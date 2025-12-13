@@ -15,6 +15,14 @@
  *   npx tsx src/bin/replay-history.ts --session <session-id> <project-dir>
  */
 
+// Unset thinking env vars that conflict with Agent SDK (same fix as worker-service.ts)
+if (process.env.MAX_THINKING_TOKENS) {
+  delete process.env.MAX_THINKING_TOKENS;
+}
+if (process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS) {
+  delete process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS;
+}
+
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join, basename } from 'path';
 import { homedir } from 'os';
@@ -121,18 +129,33 @@ function groupBySession(events: TranscriptEvent[]): Map<string, SessionData> {
       const content = event.message.content;
 
       // Extract user text messages
-      if (role === 'user' && Array.isArray(content)) {
-        for (const block of content) {
-          if (block.type === 'text' && block.text && block.text.trim()) {
-            // Filter out system messages and interrupts
-            const text = block.text.trim();
-            if (!text.startsWith('[Request interrupted') &&
-                !text.startsWith('Caveat: The messages below')) {
-              session.userMessages.push({
-                timestamp: new Date(event.timestamp),
-                promptNumber: promptNumber++,
-                text
-              });
+      if (role === 'user') {
+        // Handle string content (older transcript format)
+        if (typeof content === 'string' && content.trim()) {
+          const text = content.trim();
+          if (!text.startsWith('[Request interrupted') &&
+              !text.startsWith('Caveat: The messages below')) {
+            session.userMessages.push({
+              timestamp: new Date(event.timestamp),
+              promptNumber: promptNumber++,
+              text
+            });
+          }
+        }
+        // Handle array content (current transcript format)
+        else if (Array.isArray(content)) {
+          for (const block of content) {
+            if (block.type === 'text' && block.text && block.text.trim()) {
+              // Filter out system messages and interrupts
+              const text = block.text.trim();
+              if (!text.startsWith('[Request interrupted') &&
+                  !text.startsWith('Caveat: The messages below')) {
+                session.userMessages.push({
+                  timestamp: new Date(event.timestamp),
+                  promptNumber: promptNumber++,
+                  text
+                });
+              }
             }
           }
         }
@@ -193,7 +216,7 @@ function findClaudeExecutable(): string {
 }
 
 /**
- * Generate observations for a batch of tool events using SDK
+ * Generate observations for tool events using SDK (process individually)
  */
 async function generateObservations(
   toolEvents: ToolEvent[],
@@ -204,53 +227,64 @@ async function generateObservations(
 ): Promise<any[]> {
   if (toolEvents.length === 0) return [];
 
-  // Build prompt with tool events
-  const prompt = buildObservationPrompt(
-    { project, user_prompt: userMessage } as any,
-    toolEvents.map((e, idx) => ({
-      id: idx,
-      tool_name: e.toolName,
-      tool_input: typeof e.toolInput === 'string' ? e.toolInput : JSON.stringify(e.toolInput),
-      tool_output: typeof e.toolResponse === 'string' ? e.toolResponse : JSON.stringify(e.toolResponse),
-      created_at_epoch: e.timestamp.getTime(),
-      cwd: project
-    }))
-  );
-
+  const allObservations: any[] = [];
   const disallowedTools = ['Bash', 'Read', 'Write', 'Edit', 'Grep', 'Glob', 'WebFetch', 'WebSearch', 'Task', 'NotebookEdit', 'AskUserQuestion', 'TodoWrite'];
 
-  // Query SDK
-  const messages: any[] = [];
-  const queryResult = query({
-    prompt,
-    options: {
-      model: modelId,
-      disallowedTools,
-      pathToClaudeCodeExecutable: claudePath
-    }
-  });
+  // Process each tool event individually with current API
+  for (let idx = 0; idx < toolEvents.length; idx++) {
+    const e = toolEvents[idx];
 
-  for await (const message of queryResult) {
-    if (message.type === 'assistant') {
-      messages.push(message);
+    try {
+      const epoch = e.timestamp.getTime();
+
+      // Build observation object matching current Observation interface
+      const obs = {
+        id: idx,
+        tool_name: e.toolName,
+        tool_input: typeof e.toolInput === 'string' ? e.toolInput : JSON.stringify(e.toolInput),
+        tool_output: typeof e.toolResponse === 'string' ? e.toolResponse : JSON.stringify(e.toolResponse),
+        created_at_epoch: epoch,
+        cwd: project
+      };
+
+      // Use current buildObservationPrompt API (single observation)
+      const prompt = buildObservationPrompt(obs);
+
+      // Query SDK for this single tool event
+      const messages: any[] = [];
+      const queryResult = query({
+        prompt,
+        options: {
+          model: modelId,
+          disallowedTools,
+          pathToClaudeCodeExecutable: claudePath
+        }
+      });
+
+      for await (const message of queryResult) {
+        if (message.type === 'assistant') {
+          messages.push(message);
+        }
+      }
+
+      // Parse observations from SDK responses
+      for (const message of messages) {
+        const content = message.message.content;
+        const textContent = Array.isArray(content)
+          ? content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n')
+          : typeof content === 'string' ? content : '';
+
+        if (textContent) {
+          const parsed = parseObservations(textContent);
+          allObservations.push(...parsed);
+        }
+      }
+    } catch (error: any) {
+      console.error(`    ⚠️  Failed to process tool ${idx} (${e.toolName}):`, error.message);
     }
   }
 
-  // Parse observations from SDK responses
-  const observations: any[] = [];
-  for (const message of messages) {
-    const content = message.message.content;
-    const textContent = Array.isArray(content)
-      ? content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n')
-      : typeof content === 'string' ? content : '';
-
-    if (textContent) {
-      const parsed = parseObservations(textContent);
-      observations.push(...parsed);
-    }
-  }
-
-  return observations;
+  return allObservations;
 }
 
 /**
@@ -261,13 +295,18 @@ async function generateSummary(
   modelId: string,
   claudePath: string
 ): Promise<any | null> {
-  // Build conversation summary
-  const lastUserMsg = sessionData.userMessages[sessionData.userMessages.length - 1]?.text || '';
-  const prompt = buildSummaryPrompt(
-    { project: sessionData.project, user_prompt: sessionData.userMessages[0]?.text || '' } as any,
-    lastUserMsg,
-    '' // We don't have assistant message in historical data
-  );
+  // Build session object matching current SDKSession interface
+  const session = {
+    id: 0, // Not used in prompt
+    sdk_session_id: `historical-${sessionData.sessionId}`,
+    project: sessionData.project,
+    user_prompt: sessionData.userMessages[0]?.text || '',
+    last_user_message: sessionData.userMessages[sessionData.userMessages.length - 1]?.text || '',
+    last_assistant_message: '' // Historical data doesn't have this
+  };
+
+  // Use current buildSummaryPrompt API (single session parameter)
+  const prompt = buildSummaryPrompt(session);
 
   const disallowedTools = ['Bash', 'Read', 'Write', 'Edit', 'Grep', 'Glob', 'WebFetch', 'WebSearch', 'Task', 'NotebookEdit', 'AskUserQuestion', 'TodoWrite'];
 
@@ -387,6 +426,7 @@ async function replaySession(
       console.log(`  ✓ Generated and stored ${stats.observations} observations`);
     } catch (error: any) {
       console.error(`  ❌ Failed to generate observations:`, error.message);
+      console.error(`     Error details:`, error);
     }
   }
 
@@ -416,6 +456,7 @@ async function replaySession(
       }
     } catch (error: any) {
       console.error(`  ❌ Failed to generate summary:`, error.message);
+      console.error(`     Error details:`, error);
     }
   }
 
