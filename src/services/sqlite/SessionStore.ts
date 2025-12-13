@@ -1147,6 +1147,34 @@ export class SessionStore {
   }
 
   /**
+   * Save a historical user prompt with custom timestamp
+   * Used for importing prompts from past transcripts
+   */
+  saveHistoricalUserPrompt(
+    claudeSessionId: string,
+    promptNumber: number,
+    promptText: string,
+    createdAt: Date
+  ): number {
+    const createdAtEpoch = createdAt.getTime();
+
+    const stmt = this.db.prepare(`
+      INSERT INTO user_prompts
+      (claude_session_id, prompt_number, prompt_text, created_at, created_at_epoch)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+
+    const result = stmt.run(
+      claudeSessionId,
+      promptNumber,
+      promptText,
+      createdAt.toISOString(),
+      createdAtEpoch
+    );
+    return result.lastInsertRowid as number;
+  }
+
+  /**
    * Get user prompt by session ID and prompt number
    * Returns the prompt text, or null if not found
    */
@@ -1239,6 +1267,82 @@ export class SessionStore {
   }
 
   /**
+   * Store a historical observation with custom timestamp
+   * Used for importing observations from past transcripts
+   */
+  storeHistoricalObservation(
+    sdkSessionId: string,
+    project: string,
+    observation: {
+      type: string;
+      title: string | null;
+      subtitle: string | null;
+      facts: string[];
+      narrative: string | null;
+      concepts: string[];
+      files_read: string[];
+      files_modified: string[];
+    },
+    createdAt: Date,
+    promptNumber?: number,
+    discoveryTokens: number = 0
+  ): { id: number; createdAtEpoch: number } {
+    const createdAtEpoch = createdAt.getTime();
+
+    // Ensure session record exists in the index (auto-create if missing)
+    const checkStmt = this.db.prepare(`
+      SELECT id FROM sdk_sessions WHERE sdk_session_id = ?
+    `);
+    const existingSession = checkStmt.get(sdkSessionId) as { id: number } | undefined;
+
+    if (!existingSession) {
+      // Auto-create session record with historical timestamp
+      const insertSession = this.db.prepare(`
+        INSERT INTO sdk_sessions
+        (claude_session_id, sdk_session_id, project, started_at, started_at_epoch, status)
+        VALUES (?, ?, ?, ?, ?, 'active')
+      `);
+      insertSession.run(
+        sdkSessionId,
+        sdkSessionId,
+        project,
+        createdAt.toISOString(),
+        createdAtEpoch
+      );
+      console.error(`[SessionStore] Auto-created historical session record for: ${sdkSessionId}`);
+    }
+
+    const stmt = this.db.prepare(`
+      INSERT INTO observations
+      (sdk_session_id, project, type, title, subtitle, facts, narrative, concepts,
+       files_read, files_modified, prompt_number, discovery_tokens, created_at, created_at_epoch)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const result = stmt.run(
+      sdkSessionId,
+      project,
+      observation.type,
+      observation.title,
+      observation.subtitle,
+      JSON.stringify(observation.facts),
+      observation.narrative,
+      JSON.stringify(observation.concepts),
+      JSON.stringify(observation.files_read),
+      JSON.stringify(observation.files_modified),
+      promptNumber || null,
+      discoveryTokens,
+      createdAt.toISOString(),
+      createdAtEpoch
+    );
+
+    return {
+      id: Number(result.lastInsertRowid),
+      createdAtEpoch
+    };
+  }
+
+  /**
    * Store a session summary (from SDK parsing)
    * Auto-creates session record if it doesn't exist in the index
    */
@@ -1307,6 +1411,78 @@ export class SessionStore {
     return {
       id: Number(result.lastInsertRowid),
       createdAtEpoch: nowEpoch
+    };
+  }
+
+  /**
+   * Store a historical session summary with custom timestamp
+   * Used for importing summaries from past transcripts
+   */
+  storeHistoricalSummary(
+    sdkSessionId: string,
+    project: string,
+    summary: {
+      request: string;
+      investigated: string;
+      learned: string;
+      completed: string;
+      next_steps: string;
+      notes: string | null;
+    },
+    createdAt: Date,
+    promptNumber?: number,
+    discoveryTokens: number = 0
+  ): { id: number; createdAtEpoch: number } {
+    const createdAtEpoch = createdAt.getTime();
+
+    // Ensure session record exists in the index (auto-create if missing)
+    const checkStmt = this.db.prepare(`
+      SELECT id FROM sdk_sessions WHERE sdk_session_id = ?
+    `);
+    const existingSession = checkStmt.get(sdkSessionId) as { id: number } | undefined;
+
+    if (!existingSession) {
+      // Auto-create session record with historical timestamp
+      const insertSession = this.db.prepare(`
+        INSERT INTO sdk_sessions
+        (claude_session_id, sdk_session_id, project, started_at, started_at_epoch, status)
+        VALUES (?, ?, ?, ?, ?, 'active')
+      `);
+      insertSession.run(
+        sdkSessionId,
+        sdkSessionId,
+        project,
+        createdAt.toISOString(),
+        createdAtEpoch
+      );
+      console.error(`[SessionStore] Auto-created historical session record for: ${sdkSessionId}`);
+    }
+
+    const stmt = this.db.prepare(`
+      INSERT INTO session_summaries
+      (sdk_session_id, project, request, investigated, learned, completed,
+       next_steps, notes, prompt_number, discovery_tokens, created_at, created_at_epoch)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const result = stmt.run(
+      sdkSessionId,
+      project,
+      summary.request,
+      summary.investigated,
+      summary.learned,
+      summary.completed,
+      summary.next_steps,
+      summary.notes,
+      promptNumber || null,
+      discoveryTokens,
+      createdAt.toISOString(),
+      createdAtEpoch
+    );
+
+    return {
+      id: Number(result.lastInsertRowid),
+      createdAtEpoch
     };
   }
 

@@ -7,6 +7,19 @@
  */
 
 /**
+ * Unset thinking env vars that conflict with Agent SDK observation generation
+ * These vars cause "max_tokens must be greater than thinking.budget_tokens" errors
+ */
+function unsetThinkingEnvVars() {
+  if (process.env.MAX_THINKING_TOKENS) {
+    delete process.env.MAX_THINKING_TOKENS;
+  }
+  if (process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS) {
+    delete process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS;
+  }
+}
+
+/**
  * Windows terminal window fix for MCP SDK (vX.Y.Z):
  * The MCP SDK checks `process.type === 'renderer'` (Electron detection) before setting windowsHide.
  * By setting process.type, the SDK's isElectron() check becomes truthy on Windows, hiding
@@ -29,6 +42,7 @@ function applyWindowsHideWorkaroundIfNeeded() {
   }
 }
 
+unsetThinkingEnvVars();
 applyWindowsHideWorkaroundIfNeeded();
 import express from 'express';
 import http from 'http';
