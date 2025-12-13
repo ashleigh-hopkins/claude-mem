@@ -28,7 +28,7 @@ import { join, basename } from 'path';
 import { homedir } from 'os';
 import { SessionStore } from '../services/sqlite/SessionStore.js';
 import { parseObservations, parseSummary } from '../sdk/parser.js';
-import { buildObservationPrompt, buildSummaryPrompt } from '../sdk/prompts.js';
+import { buildInitPrompt, buildObservationPrompt, buildSummaryPrompt } from '../sdk/prompts.js';
 // @ts-ignore
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { execSync } from 'child_process';
@@ -223,7 +223,8 @@ function findClaudeExecutable(): string {
 }
 
 /**
- * Generate observations for tool events using SDK (process individually)
+ * Generate observations for a batch of tool events using SDK
+ * Uses message generator pattern like SDKAgent.ts does
  */
 async function generateObservations(
   toolEvents: ToolEvent[],
@@ -234,64 +235,83 @@ async function generateObservations(
 ): Promise<any[]> {
   if (toolEvents.length === 0) return [];
 
-  const allObservations: any[] = [];
   const disallowedTools = ['Bash', 'Read', 'Write', 'Edit', 'Grep', 'Glob', 'WebFetch', 'WebSearch', 'Task', 'NotebookEdit', 'AskUserQuestion', 'TodoWrite'];
 
-  // Process each tool event individually with current API
-  for (let idx = 0; idx < toolEvents.length; idx++) {
-    const e = toolEvents[idx];
+  // Create message generator that yields init prompt + tool events
+  async function* messageGenerator() {
+    // First message: init prompt
+    yield {
+      type: 'user' as const,
+      message: {
+        role: 'user' as const,
+        content: buildInitPrompt(project, `historical-replay`, userMessage)
+      }
+    };
 
-    try {
-      const epoch = e.timestamp.getTime();
+    // Then yield each tool event
+    for (const event of toolEvents) {
+      const epoch = event.timestamp instanceof Date && !isNaN(event.timestamp.getTime())
+        ? event.timestamp.getTime()
+        : Date.now();
 
-      // Build observation object matching current Observation interface
-      const obs = {
-        id: idx,
-        tool_name: e.toolName,
-        tool_input: typeof e.toolInput === 'string' ? e.toolInput : JSON.stringify(e.toolInput),
-        tool_output: typeof e.toolResponse === 'string' ? e.toolResponse : JSON.stringify(e.toolResponse),
-        created_at_epoch: epoch,
-        cwd: project
+      yield {
+        type: 'user' as const,
+        message: {
+          role: 'user' as const,
+          content: buildObservationPrompt({
+            id: 0,
+            tool_name: event.toolName,
+            tool_input: typeof event.toolInput === 'string' ? event.toolInput : JSON.stringify(event.toolInput),
+            tool_output: typeof event.toolResponse === 'string' ? event.toolResponse : JSON.stringify(event.toolResponse),
+            created_at_epoch: epoch,
+            cwd: project
+          })
+        }
       };
-
-      // Use current buildObservationPrompt API (single observation)
-      const prompt = buildObservationPrompt(obs);
-
-      // Query SDK for this single tool event
-      const messages: any[] = [];
-      const queryResult = query({
-        prompt,
-        options: {
-          model: modelId,
-          disallowedTools,
-          pathToClaudeCodeExecutable: claudePath
-        }
-      });
-
-      for await (const message of queryResult) {
-        if (message.type === 'assistant') {
-          messages.push(message);
-        }
-      }
-
-      // Parse observations from SDK responses
-      for (const message of messages) {
-        const content = message.message.content;
-        const textContent = Array.isArray(content)
-          ? content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n')
-          : typeof content === 'string' ? content : '';
-
-        if (textContent) {
-          const parsed = parseObservations(textContent);
-          allObservations.push(...parsed);
-        }
-      }
-    } catch (error: any) {
-      console.error(`    ⚠️  Failed to process tool ${idx} (${e.toolName}):`, error.message);
     }
   }
 
-  return allObservations;
+  // Query SDK with message generator
+  const messages: any[] = [];
+  const queryResult = query({
+    prompt: messageGenerator(),
+    options: {
+      model: modelId,
+      disallowedTools,
+      pathToClaudeCodeExecutable: claudePath,
+      max_tokens: 8192
+    }
+  });
+
+  for await (const message of queryResult) {
+    if (message.type === 'assistant') {
+      messages.push(message);
+    }
+  }
+
+  // Parse observations from SDK responses
+  console.log(`    SDK returned ${messages.length} messages`);
+  const observations: any[] = [];
+  for (const message of messages) {
+    const content = message.message.content;
+    const textContent = Array.isArray(content)
+      ? content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n')
+      : typeof content === 'string' ? content : '';
+
+    console.log(`    Message text length: ${textContent.length} chars`);
+    if (textContent.length > 0) {
+      console.log(`    First 500 chars: ${textContent.substring(0, 500)}`);
+    }
+
+    if (textContent) {
+      const parsed = parseObservations(textContent);
+      console.log(`    Parsed ${parsed.length} observations from this message`);
+      observations.push(...parsed);
+    }
+  }
+  console.log(`    Total observations parsed: ${observations.length}`);
+
+  return observations;
 }
 
 /**
