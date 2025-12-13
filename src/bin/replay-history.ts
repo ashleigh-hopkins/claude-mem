@@ -66,6 +66,7 @@ interface SessionData {
   userMessages: UserMessage[];
   toolEvents: ToolEvent[];
   allMessages: TranscriptEvent[];
+  assistantResponses: string[];  // Collect assistant text for summary context
 }
 
 /**
@@ -112,7 +113,8 @@ function groupBySession(events: TranscriptEvent[]): Map<string, SessionData> {
         startTime: new Date(event.timestamp),
         userMessages: [],
         toolEvents: [],
-        allMessages: []
+        allMessages: [],
+        assistantResponses: []
       });
     }
 
@@ -161,15 +163,20 @@ function groupBySession(events: TranscriptEvent[]): Map<string, SessionData> {
         }
       }
 
-      // Extract tool_use from assistant messages
+      // Extract tool_use and text from assistant messages
       if (role === 'assistant' && Array.isArray(content)) {
         for (const block of content) {
+          // Capture tool_use events
           if (block.type === 'tool_use' && block.id && block.name && block.input) {
             toolUseMap.set(block.id, {
               toolName: block.name,
               toolInput: block.input,
               timestamp: new Date(event.timestamp)
             });
+          }
+          // Capture assistant text responses for summary context
+          if (block.type === 'text' && block.text) {
+            session.assistantResponses.push(block.text);
           }
         }
       }
@@ -296,13 +303,16 @@ async function generateSummary(
   claudePath: string
 ): Promise<any | null> {
   // Build session object matching current SDKSession interface
+  // Concatenate last 5000 characters of assistant responses for context
+  const assistantContext = sessionData.assistantResponses.join('\n').slice(-5000);
+
   const session = {
     id: 0, // Not used in prompt
     sdk_session_id: `historical-${sessionData.sessionId}`,
     project: sessionData.project,
     user_prompt: sessionData.userMessages[0]?.text || '',
     last_user_message: sessionData.userMessages[sessionData.userMessages.length - 1]?.text || '',
-    last_assistant_message: '' // Historical data doesn't have this
+    last_assistant_message: assistantContext || 'No assistant responses captured'
   };
 
   // Use current buildSummaryPrompt API (single session parameter)
