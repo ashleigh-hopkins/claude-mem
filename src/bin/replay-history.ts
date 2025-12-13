@@ -108,9 +108,12 @@ function groupBySession(events: TranscriptEvent[]): Map<string, SessionData> {
     const sessionId = event.sessionId;
 
     if (!sessions.has(sessionId)) {
+      // Extract project name from full path (e.g., "cost-analysis" from "/Users/.../cost-analysis")
+      const projectName = event.cwd ? basename(event.cwd) : 'unknown';
+
       sessions.set(sessionId, {
         sessionId,
-        project: event.cwd,
+        project: projectName,
         startTime: new Date(event.timestamp),
         userMessages: [],
         toolEvents: [],
