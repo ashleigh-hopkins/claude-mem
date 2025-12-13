@@ -57,6 +57,7 @@ interface ToolEvent {
   toolInput: any;
   toolResponse: any;
   toolUseId: string;
+  promptNumber?: number;  // Track which user prompt this tool belongs to
 }
 
 interface SessionData {
@@ -121,10 +122,13 @@ function groupBySession(events: TranscriptEvent[]): Map<string, SessionData> {
     sessions.get(sessionId)!.allMessages.push(event);
   }
 
-  // Second pass: extract user messages and tool events
+  // Second pass: extract user messages and tool events with proper attribution
   for (const [sessionId, session] of sessions) {
     let promptNumber = 1;
     const toolUseMap = new Map<string, { toolName: string; toolInput: any; timestamp: Date }>();
+
+    // Track the current prompt number for tool attribution
+    let currentPromptForTools = 1;
 
     for (const event of session.allMessages) {
       const role = event.message.role;
@@ -132,31 +136,41 @@ function groupBySession(events: TranscriptEvent[]): Map<string, SessionData> {
 
       // Extract user text messages
       if (role === 'user') {
-        // Handle string content (older transcript format)
-        if (typeof content === 'string' && content.trim()) {
-          const text = content.trim();
-          if (!text.startsWith('[Request interrupted') &&
-              !text.startsWith('Caveat: The messages below')) {
-            session.userMessages.push({
-              timestamp: new Date(event.timestamp),
-              promptNumber: promptNumber++,
-              text
-            });
+        // Check if this is a tool_result message (not a new user prompt)
+        const isToolResult = Array.isArray(content) && content.some((b: any) => b.type === 'tool_result');
+
+        if (!isToolResult) {
+          // This is a real user message - handle both formats
+          // Handle string content (older transcript format)
+          if (typeof content === 'string' && content.trim()) {
+            const text = content.trim();
+            if (!text.startsWith('[Request interrupted') &&
+                !text.startsWith('Caveat: The messages below')) {
+              session.userMessages.push({
+                timestamp: new Date(event.timestamp),
+                promptNumber: promptNumber,
+                text
+              });
+              currentPromptForTools = promptNumber;  // Tools after this belong to this prompt
+              promptNumber++;
+            }
           }
-        }
-        // Handle array content (current transcript format)
-        else if (Array.isArray(content)) {
-          for (const block of content) {
-            if (block.type === 'text' && block.text && block.text.trim()) {
-              // Filter out system messages and interrupts
-              const text = block.text.trim();
-              if (!text.startsWith('[Request interrupted') &&
-                  !text.startsWith('Caveat: The messages below')) {
-                session.userMessages.push({
-                  timestamp: new Date(event.timestamp),
-                  promptNumber: promptNumber++,
-                  text
-                });
+          // Handle array content (current transcript format)
+          else if (Array.isArray(content)) {
+            for (const block of content) {
+              if (block.type === 'text' && block.text && block.text.trim()) {
+                // Filter out system messages and interrupts
+                const text = block.text.trim();
+                if (!text.startsWith('[Request interrupted') &&
+                    !text.startsWith('Caveat: The messages below')) {
+                  session.userMessages.push({
+                    timestamp: new Date(event.timestamp),
+                    promptNumber: promptNumber,
+                    text
+                  });
+                  currentPromptForTools = promptNumber;  // Tools after this belong to this prompt
+                  promptNumber++;
+                }
               }
             }
           }
@@ -187,12 +201,14 @@ function groupBySession(events: TranscriptEvent[]): Map<string, SessionData> {
           if (block.type === 'tool_result' && block.tool_use_id) {
             const toolUse = toolUseMap.get(block.tool_use_id);
             if (toolUse) {
+              // Assign this tool to the current prompt (last user message seen)
               session.toolEvents.push({
                 timestamp: toolUse.timestamp,
                 toolName: toolUse.toolName,
                 toolInput: toolUse.toolInput,
                 toolResponse: block.content,
-                toolUseId: block.tool_use_id
+                toolUseId: block.tool_use_id,
+                promptNumber: currentPromptForTools
               });
               toolUseMap.delete(block.tool_use_id);
             }
@@ -425,39 +441,52 @@ async function replaySession(
 
   console.log(`  ✓ Stored ${stats.prompts} user prompts`);
 
-  // Generate and store observations from tool events
+  // Generate and store observations from tool events (grouped by prompt)
   if (sessionData.toolEvents.length > 0) {
-    console.log(`  ⏳ Generating observations from ${sessionData.toolEvents.length} tool events...`);
-
-    try {
-      const observations = await generateObservations(
-        sessionData.toolEvents,
-        sessionData.userMessages[0]?.text || '',
-        sessionData.project,
-        modelId,
-        claudePath
-      );
-
-      for (const obs of observations) {
-        // Use timestamp of first tool event for the observation
-        const timestamp = sessionData.toolEvents[0].timestamp;
-
-        db.storeHistoricalObservation(
-          syntheticSdkSessionId,
-          sessionData.project,
-          obs,
-          timestamp,
-          1, // promptNumber
-          0  // discoveryTokens
-        );
-        stats.observations++;
+    // Group tools by prompt number for proper attribution
+    const toolsByPrompt = new Map<number, ToolEvent[]>();
+    for (const tool of sessionData.toolEvents) {
+      const promptNum = tool.promptNumber || 1;
+      if (!toolsByPrompt.has(promptNum)) {
+        toolsByPrompt.set(promptNum, []);
       }
-
-      console.log(`  ✓ Generated and stored ${stats.observations} observations`);
-    } catch (error: any) {
-      console.error(`  ❌ Failed to generate observations:`, error.message);
-      console.error(`     Error details:`, error);
+      toolsByPrompt.get(promptNum)!.push(tool);
     }
+
+    console.log(`  ⏳ Generating observations from ${sessionData.toolEvents.length} tool events across ${toolsByPrompt.size} prompts...`);
+
+    // Process each prompt's tools separately
+    for (const [promptNum, promptTools] of toolsByPrompt) {
+      try {
+        const observations = await generateObservations(
+          promptTools,
+          sessionData.userMessages[0]?.text || '',
+          sessionData.project,
+          modelId,
+          claudePath
+        );
+
+        for (const obs of observations) {
+          // Use timestamp and prompt number from first tool in this prompt group
+          const firstTool = promptTools[0];
+          const timestamp = firstTool.timestamp;
+
+          db.storeHistoricalObservation(
+            syntheticSdkSessionId,
+            sessionData.project,
+            obs,
+            timestamp,
+            promptNum, // Use prompt number from this group
+            0  // discoveryTokens
+          );
+          stats.observations++;
+        }
+      } catch (error: any) {
+        console.error(`    ❌ Failed to generate observations for prompt ${promptNum}:`, error.message);
+      }
+    }
+
+    console.log(`  ✓ Generated and stored ${stats.observations} observations`);
   }
 
   // Generate and store session summary
