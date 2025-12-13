@@ -147,8 +147,12 @@ function groupBySession(events: TranscriptEvent[]): Map<string, SessionData> {
           // Handle string content (older transcript format)
           if (typeof content === 'string' && content.trim()) {
             const text = content.trim();
+            // Filter out system messages, interrupts, and bash notifications
             if (!text.startsWith('[Request interrupted') &&
-                !text.startsWith('Caveat: The messages below')) {
+                !text.startsWith('Caveat: The messages below') &&
+                !text.startsWith('<bash-input>') &&
+                !text.startsWith('<bash-stdout>') &&
+                !text.startsWith('<bash-stderr>')) {
               session.userMessages.push({
                 timestamp: new Date(event.timestamp),
                 promptNumber: promptNumber,
@@ -162,10 +166,13 @@ function groupBySession(events: TranscriptEvent[]): Map<string, SessionData> {
           else if (Array.isArray(content)) {
             for (const block of content) {
               if (block.type === 'text' && block.text && block.text.trim()) {
-                // Filter out system messages and interrupts
+                // Filter out system messages, interrupts, and bash notifications
                 const text = block.text.trim();
                 if (!text.startsWith('[Request interrupted') &&
-                    !text.startsWith('Caveat: The messages below')) {
+                    !text.startsWith('Caveat: The messages below') &&
+                    !text.startsWith('<bash-input>') &&
+                    !text.startsWith('<bash-stdout>') &&
+                    !text.startsWith('<bash-stderr>')) {
                   session.userMessages.push({
                     timestamp: new Date(event.timestamp),
                     promptNumber: promptNumber,
