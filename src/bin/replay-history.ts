@@ -657,7 +657,7 @@ Note:
 
   // Load settings
   const settings = SettingsDefaultsManager.loadFromFile(USER_SETTINGS_PATH);
-  const modelId = settings.CLAUDE_MEM_MODEL || 'claude-haiku-4-5';
+  const modelId = settings.CLAUDE_MEM_MODEL || 'claude-sonnet-4-5';
   const claudePath = findClaudeExecutable();
 
   console.log(`Using model: ${modelId}`);
