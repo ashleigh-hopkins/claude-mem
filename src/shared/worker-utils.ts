@@ -1,11 +1,12 @@
 import path from "path";
 import { homedir } from "os";
 import { spawnSync } from "child_process";
-import { existsSync, writeFileSync, readFileSync } from "fs";
+import { existsSync, writeFileSync, readFileSync, mkdirSync } from "fs";
 import { logger } from "../utils/logger.js";
 import { HOOK_TIMEOUTS, getTimeout } from "./hook-constants.js";
 import { ProcessManager } from "../services/process/ProcessManager.js";
 import { SettingsDefaultsManager } from "./SettingsDefaultsManager.js";
+import { getWorkerRestartInstructions } from "../utils/error-messages.js";
 
 const MARKETPLACE_ROOT = path.join(homedir(), '.claude', 'plugins', 'marketplaces', 'thedotmack');
 
@@ -138,7 +139,11 @@ async function ensureWorkerVersionMatches(): Promise<void> {
 
     // Verify it's healthy
     if (!await isWorkerHealthy()) {
-      logger.error('SYSTEM', 'Worker failed to restart after version mismatch');
+      logger.error('SYSTEM', 'Worker failed to restart after version mismatch', {
+        expectedVersion: pluginVersion,
+        runningVersion: workerVersion,
+        port
+      });
     }
   }
 }
@@ -149,7 +154,11 @@ async function ensureWorkerVersionMatches(): Promise<void> {
  */
 async function startWorker(): Promise<boolean> {
   // Clean up legacy PM2 (one-time migration)
-  const pm2MigratedMarker = path.join(SettingsDefaultsManager.get('CLAUDE_MEM_DATA_DIR'), '.pm2-migrated');
+  const dataDir = SettingsDefaultsManager.get('CLAUDE_MEM_DATA_DIR');
+  const pm2MigratedMarker = path.join(dataDir, '.pm2-migrated');
+
+  // Ensure data directory exists (may not exist on fresh install)
+  mkdirSync(dataDir, { recursive: true });
 
   if (!existsSync(pm2MigratedMarker)) {
     try {
@@ -197,9 +206,10 @@ export async function ensureWorkerRunning(): Promise<void> {
   if (!started) {
     const port = getWorkerPort();
     throw new Error(
-      `Worker service failed to start on port ${port}.\n\n` +
-      `To start manually, run: npm run worker:start\n` +
-      `If already running, try: npm run worker:restart`
+      getWorkerRestartInstructions({
+        port,
+        customPrefix: `Worker service failed to start on port ${port}.`
+      })
     );
   }
 
@@ -217,7 +227,9 @@ export async function ensureWorkerRunning(): Promise<void> {
   const port = getWorkerPort();
   logger.error('SYSTEM', 'Worker started but not responding to health checks');
   throw new Error(
-    `Worker service started but is not responding on port ${port}.\n\n` +
-    `Try: npm run worker:restart`
+    getWorkerRestartInstructions({
+      port,
+      customPrefix: `Worker service started but is not responding on port ${port}.`
+    })
   );
 }
