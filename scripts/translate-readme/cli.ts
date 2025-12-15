@@ -1,15 +1,7 @@
 #!/usr/bin/env bun
 
-/**
- * Unset thinking env vars that conflict with Agent SDK
- * These vars cause "max_tokens must be greater than thinking.budget_tokens" errors
- */
-if (process.env.MAX_THINKING_TOKENS) {
-  delete process.env.MAX_THINKING_TOKENS;
-}
-if (process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS) {
-  delete process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS;
-}
+// MUST be imported first - fixes Agent SDK env var conflicts
+import "../../src/utils/agent-sdk-env-fix.js";
 
 import { translateReadme, SUPPORTED_LANGUAGES } from "./index.ts";
 

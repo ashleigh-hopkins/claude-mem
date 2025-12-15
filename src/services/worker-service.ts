@@ -6,18 +6,8 @@
  * See src/services/worker/README.md for architecture details.
  */
 
-/**
- * Unset thinking env vars that conflict with Agent SDK observation generation
- * These vars cause "max_tokens must be greater than thinking.budget_tokens" errors
- */
-function unsetThinkingEnvVars() {
-  if (process.env.MAX_THINKING_TOKENS) {
-    delete process.env.MAX_THINKING_TOKENS;
-  }
-  if (process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS) {
-    delete process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS;
-  }
-}
+// MUST be imported first - fixes Agent SDK env var conflicts
+import '../utils/agent-sdk-env-fix.js';
 
 /**
  * Windows terminal window fix for MCP SDK (vX.Y.Z):
@@ -29,21 +19,16 @@ function unsetThinkingEnvVars() {
  * TODO: Remove this workaround once MCP SDK exposes a config for windowsHide or fixes detection.
  * See: https://github.com/modelcontextprotocol/sdk/issues/XXX
  */
-function applyWindowsHideWorkaroundIfNeeded() {
-  if (process.platform === 'win32' && !process.type) {
-    // Optionally, check MCP SDK version here if available
-    // Log a warning so this is visible in logs
-    // eslint-disable-next-line no-console
-    console.warn(
-      '[worker-service] Applying MCP SDK windowsHide workaround: setting process.type = "renderer". ' +
-      'This is a fragile hack. Remove when MCP SDK is fixed. See code comments for details.'
-    );
-    (process as any).type = 'renderer';
-  }
+if (process.platform === 'win32' && !process.type) {
+  // Optionally, check MCP SDK version here if available
+  // Log a warning so this is visible in logs
+  // eslint-disable-next-line no-console
+  console.warn(
+    '[worker-service] Applying MCP SDK windowsHide workaround: setting process.type = "renderer". ' +
+    'This is a fragile hack. Remove when MCP SDK is fixed. See code comments for details.'
+  );
+  (process as any).type = 'renderer';
 }
-
-unsetThinkingEnvVars();
-applyWindowsHideWorkaroundIfNeeded();
 
 import express from 'express';
 import http from 'http';

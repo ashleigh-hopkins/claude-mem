@@ -15,13 +15,8 @@
  *   npx tsx src/bin/replay-history.ts --session <session-id> <project-dir>
  */
 
-// Unset thinking env vars that conflict with Agent SDK (same fix as worker-service.ts)
-if (process.env.MAX_THINKING_TOKENS) {
-  delete process.env.MAX_THINKING_TOKENS;
-}
-if (process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS) {
-  delete process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS;
-}
+// MUST be imported first - fixes Agent SDK env var conflicts
+import '../utils/agent-sdk-env-fix.js';
 
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join, basename } from 'path';
