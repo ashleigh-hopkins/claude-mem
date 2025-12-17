@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Header } from './components/Header';
-import { FeedEnhanced } from './components/FeedEnhanced';
+import { FeedSimple } from './components/FeedSimple';
 import { SessionContext } from './components/SessionContext';
 import { ContextSettingsModal } from './components/ContextSettingsModal';
 import { useSSE } from './hooks/useSSE';
@@ -59,24 +59,20 @@ export function App() {
   }, [observations, paginatedObservations, urlState.state.project, urlState.state.search, urlState.state.session]);
 
   const allSummaries = useMemo(() => {
-    let items = urlState.state.project
+    const items = urlState.state.project
       ? paginatedSummaries
       : mergeAndDeduplicateByProject(summaries, paginatedSummaries);
 
-      items = items.filter(s => s.session_id === urlState.state.session);
-
     return items;
-  }, [summaries, paginatedSummaries, urlState.state.project, urlState.state.session]);
+  }, [summaries, paginatedSummaries, urlState.state.project]);
 
   const allPrompts = useMemo(() => {
-    let items = urlState.state.project
+    const items = urlState.state.project
       ? paginatedPrompts
       : mergeAndDeduplicateByProject(prompts, paginatedPrompts);
 
-      items = items.filter(p => p.claude_session_id === urlState.state.session);
-
     return items;
-  }, [prompts, paginatedPrompts, urlState.state.project, urlState.state.session]);
+  }, [prompts, paginatedPrompts, urlState.state.project]);
 
   // Toggle context preview modal
   const toggleContextPreview = useCallback(() => {
@@ -116,12 +112,8 @@ export function App() {
   }, [urlState.state.project]);
 
   // Determine if we should group by prompts (when session filtered and multiple prompts exist)
-  const shouldGroupByPrompts = useMemo(() => {
-    return !!urlState.state.session && allObservations.length > 5;
-  }, [urlState.state.session, allObservations.length]);
 
   // Show pivots when viewing a single session
-  const shouldShowPivots = !!urlState.state.session;
 
   return (
     <>
@@ -152,16 +144,13 @@ export function App() {
         />
       )}
 
-      <FeedEnhanced
+      <FeedSimple
         observations={allObservations}
         summaries={allSummaries}
         prompts={allPrompts}
         onLoadMore={handleLoadMore}
         isLoading={pagination.observations.isLoading || pagination.summaries.isLoading || pagination.prompts.isLoading}
         hasMore={pagination.observations.hasMore || pagination.summaries.hasMore || pagination.prompts.hasMore}
-        groupByPrompts={shouldGroupByPrompts}
-        showPivots={shouldShowPivots}
-        sessionFilter={urlState.state.session}
       />
 
       <ContextSettingsModal
