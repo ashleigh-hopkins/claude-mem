@@ -247,13 +247,18 @@ function findClaudeExecutable(): string {
 }
 
 /**
- * Generate observations for a batch of tool events using SDK
- * Uses message generator pattern like SDKAgent.ts does
+ * Generate observations for ALL tool events using single persistent SDK session
+ * Matches real claude-mem PostToolUse behavior:
+ * - ONE SDK session for entire replay (not batched)
+ * - Tools streamed individually to SDK via message generator
+ * - SDK decides natural observation grouping with full context
+ * - Prompt numbers preserved from tool events for correct attribution
  */
 async function generateObservations(
   toolEvents: ToolEvent[],
   userMessage: string,
   project: string,
+  sessionId: string,
   modelId: string,
   claudePath: string
 ): Promise<any[]> {
@@ -268,7 +273,7 @@ async function generateObservations(
       type: 'user' as const,
       message: {
         role: 'user' as const,
-        content: buildInitPrompt(project, `historical-replay`, userMessage)
+        content: buildInitPrompt(project, sessionId, userMessage)
       }
     };
 
@@ -352,7 +357,7 @@ async function generateSummary(
 
   const session = {
     id: 0, // Not used in prompt
-    sdk_session_id: `historical-${sessionData.sessionId}`,
+    sdk_session_id: sessionData.sessionId,  // Use original session ID
     project: sessionData.project,
     user_prompt: sessionData.userMessages[0]?.text || '',
     last_user_message: sessionData.userMessages[sessionData.userMessages.length - 1]?.text || '',
@@ -416,14 +421,16 @@ async function replaySession(
     return stats;
   }
 
-  const syntheticSdkSessionId = `historical-${sessionData.sessionId}`;
+  // Use original session ID unchanged - matches system contract
+  // Normal sessions have claude_session_id === sdk_session_id (no prefix)
+  const sessionId = sessionData.sessionId;
 
   // Initialize Chroma sync (all projects use 'claude-mem' collection)
   const chromaSync = syncToChroma ? new ChromaSync('claude-mem') : null;
 
   // Check if session already exists
   const existing = db['db'].prepare('SELECT id FROM sdk_sessions WHERE claude_session_id = ?')
-    .get(sessionData.sessionId) as { id: number } | undefined;
+    .get(sessionId) as { id: number } | undefined;
 
   if (existing) {
     console.log(`  ⊘ Session already imported, skipping`);
@@ -432,11 +439,11 @@ async function replaySession(
 
   // Create session record
   const sessionDbId = db.createSDKSession(
-    sessionData.sessionId,
+    sessionId,
     sessionData.project,
     sessionData.userMessages[0]?.text || ''
   );
-  db.updateSDKSessionId(sessionDbId, syntheticSdkSessionId);
+  db.updateSDKSessionId(sessionDbId, sessionId);
 
   console.log(`  ✓ Created session record`);
 
@@ -453,71 +460,69 @@ async function replaySession(
 
   console.log(`  ✓ Stored ${stats.prompts} user prompts`);
 
-  // Generate and store observations from tool events (grouped by prompt)
+  // Generate and store observations from tool events (single persistent SDK session)
   if (sessionData.toolEvents.length > 0) {
-    // Group tools by prompt number for proper attribution
-    const toolsByPrompt = new Map<number, ToolEvent[]>();
-    for (const tool of sessionData.toolEvents) {
-      const promptNum = tool.promptNumber || 1;
-      if (!toolsByPrompt.has(promptNum)) {
-        toolsByPrompt.set(promptNum, []);
-      }
-      toolsByPrompt.get(promptNum)!.push(tool);
-    }
+    console.log(`  ⏳ Generating observations from ${sessionData.toolEvents.length} tool events using single persistent SDK session...`);
 
-    console.log(`  ⏳ Generating observations from ${sessionData.toolEvents.length} tool events across ${toolsByPrompt.size} prompts...`);
+    try {
+      // Process ALL tools in ONE SDK session (matches real claude-mem behavior)
+      // SDK receives all tools streamed individually and decides natural observation grouping
+      const observations = await generateObservations(
+        sessionData.toolEvents,
+        sessionData.userMessages[0]?.text || '',
+        sessionData.project,
+        sessionId,
+        modelId,
+        claudePath
+      );
 
-    // Process each prompt's tools separately
-    for (const [promptNum, promptTools] of toolsByPrompt) {
-      try {
-        const observations = await generateObservations(
-          promptTools,
-          sessionData.userMessages[0]?.text || '',
+      console.log(`    SDK generated ${observations.length} observations`);
+
+      // Store observations with correct prompt number attribution
+      // Tools maintain their prompt numbers during parsing, observations inherit from their tool
+      let toolIndex = 0;
+      for (const obs of observations) {
+        // Observations typically align with tools in order
+        // Use tool's timestamp and prompt number for attribution
+        const tool = sessionData.toolEvents[toolIndex] || sessionData.toolEvents[0];
+        const timestamp = tool.timestamp;
+        const promptNum = tool.promptNumber || 1;
+
+        const result = db.storeHistoricalObservation(
+          sessionId,  // Use original session ID
           sessionData.project,
-          modelId,
-          claudePath
+          obs,
+          timestamp,
+          promptNum,  // Tool's prompt number
+          0  // discoveryTokens
         );
 
-        for (const obs of observations) {
-          // Use timestamp and prompt number from first tool in this prompt group
-          const firstTool = promptTools[0];
-          const timestamp = firstTool.timestamp;
-
-          const result = db.storeHistoricalObservation(
-            syntheticSdkSessionId,
-            sessionData.project,
-            obs,
-            timestamp,
-            promptNum, // Use prompt number from this group
-            0  // discoveryTokens
-          );
-
-          // Sync to Chroma if enabled
-          if (chromaSync) {
-            try {
-              await chromaSync.syncObservation(
-                result.id,
-                syntheticSdkSessionId,
-                sessionData.project,
-                obs,
-                promptNum,
-                result.createdAtEpoch,
-                0  // discoveryTokens
-              );
-            } catch (error: any) {
-              console.error(`      ⚠️  Chroma sync failed for observation #${result.id}: ${error.message}`);
-              // Continue even if Chroma sync fails
-            }
+        // Sync to Chroma if enabled
+        if (chromaSync) {
+          try {
+            await chromaSync.syncObservation(
+              result.id,
+              sessionId,  // Use original session ID
+              sessionData.project,
+              obs,
+              promptNum,
+              result.createdAtEpoch,
+              0  // discoveryTokens
+            );
+          } catch (error: any) {
+            console.error(`      ⚠️  Chroma sync failed for observation #${result.id}: ${error.message}`);
+            // Continue even if Chroma sync fails
           }
-
-          stats.observations++;
         }
-      } catch (error: any) {
-        console.error(`    ❌ Failed to generate observations for prompt ${promptNum}:`, error.message);
-      }
-    }
 
-    console.log(`  ✓ Generated and stored ${stats.observations} observations`);
+        stats.observations++;
+        toolIndex++;
+      }
+
+      console.log(`  ✓ Generated and stored ${stats.observations} observations`);
+    } catch (error: any) {
+      console.error(`    ❌ Failed to generate observations:`, error.message);
+    }
   }
 
   // Generate and store session summary
@@ -533,7 +538,7 @@ async function replaySession(
         const endTime = new Date(lastEvent.timestamp);
 
         const summaryResult = db.storeHistoricalSummary(
-          syntheticSdkSessionId,
+          sessionId,  // Use original session ID
           sessionData.project,
           summary,
           endTime,
@@ -546,7 +551,7 @@ async function replaySession(
           try {
             await chromaSync.syncSummary(
               summaryResult.id,
-              syntheticSdkSessionId,
+              sessionId,  // Use original session ID
               sessionData.project,
               summary,
               sessionData.userMessages.length,
