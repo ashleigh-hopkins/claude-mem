@@ -2,11 +2,13 @@
 # Register Fork as Installed Plugin
 #
 # This script registers your fork in Claude Code's installed_plugins.json
-# so it shows up as an installed plugin in the CLI.
+# so it shows up as an installed plugin in the UI.
 
 PLUGINS_FILE="$HOME/.claude/plugins/installed_plugins.json"
 PLUGIN_DIR="$HOME/.claude/plugins/marketplaces/thedotmack"
 VERSION=$(grep '"version"' "$PLUGIN_DIR/package.json" | head -1 | cut -d'"' -f4)
+# Claude Code UI expects path to be in cache directory
+CACHE_PATH="$HOME/.claude/plugins/cache/thedotmack/claude-mem/$VERSION"
 
 if [ ! -f "$PLUGINS_FILE" ]; then
   echo "❌ Plugins file not found: $PLUGINS_FILE"
@@ -20,17 +22,23 @@ if [ ! -d "$PLUGIN_DIR" ]; then
   exit 1
 fi
 
+if [ ! -d "$CACHE_PATH" ]; then
+  echo "❌ Cache directory not found: $CACHE_PATH"
+  echo "   Run 'npm run sync-marketplace:force' first"
+  exit 1
+fi
+
 echo "Registering claude-mem fork..."
 echo "  Version: $VERSION"
-echo "  Path: $PLUGIN_DIR"
+echo "  Cache path: $CACHE_PATH"
 
 # Backup existing file
 cp "$PLUGINS_FILE" "$PLUGINS_FILE.backup"
 
-# Update the JSON to point to marketplaces directory
+# Update the JSON to point to cache directory (where UI expects it)
 if command -v jq >/dev/null 2>&1; then
   # Use jq if available
-  jq --arg path "$PLUGIN_DIR" --arg version "$VERSION" \
+  jq --arg path "$CACHE_PATH" --arg version "$VERSION" \
     '.plugins["claude-mem@thedotmack"] = [{
       "scope": "user",
       "installPath": $path,
@@ -54,7 +62,7 @@ else
   "claude-mem@thedotmack": [
     {
       "scope": "user",
-      "installPath": "$PLUGIN_DIR",
+      "installPath": "$CACHE_PATH",
       "version": "$VERSION",
       "installedAt": "$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")",
       "lastUpdated": "$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")",
