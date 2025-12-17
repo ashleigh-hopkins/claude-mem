@@ -106,6 +106,7 @@ npx mintlify dev
 - **[Installation Guide](https://docs.claude-mem.ai/installation)** - Quick start & advanced installation
 - **[Usage Guide](https://docs.claude-mem.ai/usage/getting-started)** - How Claude-Mem works automatically
 - **[Search Tools](https://docs.claude-mem.ai/usage/search-tools)** - Query your project history with natural language
+- **[Historical Import](https://docs.claude-mem.ai/usage/historical-import)** - Import complete session history from Claude Code transcripts
 - **[Beta Features](https://docs.claude-mem.ai/beta-features)** - Try experimental features like Endless Mode
 
 ### Best Practices
@@ -437,6 +438,56 @@ npm run bug-report --no-logs    # Skip logs for privacy
 npm run bug-report --verbose    # Show all diagnostics
 npm run bug-report --help       # Show help
 ```
+
+---
+
+## Advanced Tools
+
+### Historical Import
+
+Import your complete Claude Code session history into claude-mem. See **[Historical Import Guide](https://docs.claude-mem.ai/usage/historical-import)** for full documentation.
+
+```bash
+# From the plugin directory
+cd ~/.claude/plugins/marketplaces/thedotmack
+
+# Import all conversation history
+npm run history:replay-all
+
+# Import specific project
+npm run history:replay ~/.claude/projects/-path-to-project
+
+# Import without Chroma sync (faster)
+bun src/bin/replay-history.ts --all --no-chroma
+```
+
+**What gets imported:**
+- ✅ Session records with historical timestamps
+- ✅ User prompts (searchable)
+- ✅ Observations generated from tool usage
+- ✅ Session summaries
+- ✅ Chroma vector embeddings
+
+### Chroma Vector Database Tools
+
+**Check database statistics:**
+```bash
+npm run chroma:stats
+```
+
+**Inspect specific observation:**
+```bash
+npm run chroma:inspect 13615
+```
+
+**Backfill missing embeddings:**
+```bash
+npm run chroma:backfill --project myproject
+# Or with options:
+bun scripts/backfill-chroma.ts --project sam-api,ums-api --since 2025-10-01
+```
+
+Useful for fixing missing vector embeddings or after importing history with `--no-chroma`.
 
 ---
 

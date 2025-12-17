@@ -1,0 +1,368 @@
+---
+title: "Historical Import"
+description: "Import complete Claude Code session history into claude-mem"
+---
+
+# Historical Import Tools
+
+Import your complete Claude Code session history into claude-mem, including all past conversations, observations, and summaries. Useful for:
+- Setting up claude-mem on a new computer with existing conversation history
+- Recovering historical context after reinstalling
+- Backfilling vector database after SQLite-only imports
+
+## Overview
+
+Two tools work together for comprehensive historical imports:
+
+1. **`replay-history.ts`** - Import full transcript history from Claude Code projects
+2. **`backfill-chroma.ts`** - Sync existing SQLite observations to Chroma vector database
+
+## Tool 1: Replay History
+
+Imports complete Claude Code sessions from transcript files into claude-mem database.
+
+### What Gets Imported
+
+✅ Session records (with historical timestamps)
+✅ User prompts (all your messages, searchable)
+✅ Observations (generated from tool usage via Agent SDK)
+✅ Session summaries (generated via Agent SDK)
+✅ Chroma vector embeddings (for semantic search)
+
+### Location of Transcript Files
+
+Claude Code stores transcripts at:
+- **macOS/Linux**: `~/.claude/projects/`
+- **Windows**: `%USERPROFILE%\.claude\projects\`
+
+Each project directory contains `.jsonl` files with session transcripts.
+
+### Usage
+
+```bash
+# From the plugin directory
+cd ~/.claude/plugins/marketplaces/thedotmack
+
+# Import all projects
+bun src/bin/replay-history.ts --all
+
+# Import specific project
+bun src/bin/replay-history.ts ~/.claude/projects/-Users-you-Projects-myproject
+
+# Preview without importing
+bun src/bin/replay-history.ts --all --dry-run
+
+# Limit number of sessions (for testing)
+bun src/bin/replay-history.ts --all --max-sessions 5
+
+# Import without Chroma sync (faster, SQLite only)
+bun src/bin/replay-history.ts --all --no-chroma
+```
+
+### Command Options
+
+| Option | Description |
+|--------|-------------|
+| `--all` | Import all projects in ~/.claude/projects |
+| `--dry-run` | Preview what would be imported without importing |
+| `--max-sessions N` | Limit to first N sessions per project |
+| `--no-chroma` | Skip Chroma vector sync (SQLite only) |
+| `-h, --help` | Show help message |
+
+### Example Output
+
+```
+Starting historical replay...
+
+Using model: claude-sonnet-4-5
+Claude path: /opt/homebrew/bin/claude
+Chroma sync: ✅ Enabled
+
+================================================================================
+Processing: myproject
+================================================================================
+Found 15 transcript file(s)
+Found 8 session(s)
+
+  Session: a1b2c3d4...
+  Started: 2025-11-15T09:30:00.000Z
+  Messages: 5 user, 43 tools
+  ⏳ Generating observations...
+    Processing prompts: 5/5
+  ✓ Generated and stored 12 observations
+  ✓ Generated and stored session summary
+
+[... more sessions ...]
+
+================================================================================
+Replay Complete!
+================================================================================
+Sessions imported: 8
+User prompts stored: 40
+Observations generated: 96
+Summaries generated: 8
+================================================================================
+```
+
+### Performance
+
+**Expected Duration:**
+- Small project (1-2 sessions): 2-5 minutes
+- Medium project (5-10 sessions): 10-30 minutes
+- Large project (20+ sessions): 30-60+ minutes
+
+**Resource Usage:**
+- Each observation takes ~10-15 seconds to generate (Agent SDK)
+- Chroma sync adds ~1-2 seconds per observation
+- Process is I/O and network bound
+
+## Tool 2: Backfill Chroma
+
+Syncs existing SQLite observations to Chroma vector database that are missing from the vector index. Useful when:
+- You imported history with `--no-chroma` flag
+- Chroma sync failed during import
+- Vector database was deleted but SQLite preserved
+- You want to fix missing embeddings
+
+### Usage
+
+```bash
+# From the plugin directory
+cd ~/.claude/plugins/marketplaces/thedotmack
+
+# Backfill all projects
+bun scripts/backfill-chroma.ts
+
+# Backfill specific projects
+bun scripts/backfill-chroma.ts --project sam-api,ums-api
+
+# Backfill observations since specific date
+bun scripts/backfill-chroma.ts --since 2025-10-01
+
+# Preview without syncing
+bun scripts/backfill-chroma.ts --dry-run
+
+# Verbose mode (show each observation)
+bun scripts/backfill-chroma.ts --verbose
+```
+
+### Command Options
+
+| Option | Description |
+|--------|-------------|
+| `--project name1,name2` | Comma-separated project names to backfill |
+| `--since YYYY-MM-DD` | Only backfill observations after this date |
+| `--dry-run` | Show what would be synced without syncing |
+| `--verbose` | Show each observation as it syncs |
+| `-h, --help` | Show help message |
+
+### Example Output
+
+```
+🔍 Chroma Backfill Tool
+
+Scanning for missing observations...
+  Found 58 observations in SQLite
+  58 missing from Chroma
+
+Found 58 observations missing from Chroma:
+
+  sam-api: 20 observations
+  ums-api: 38 observations
+
+Starting backfill...
+
+📦 Backfilling sam-api (20 observations)...
+  ✓ Completed: 20 observations
+
+📦 Backfilling ums-api (38 observations)...
+  ✓ Completed: 38 observations
+
+══════════════════════════════════════════════════
+
+✅ Backfill complete!
+
+  Synced: 58 observations
+  Failed: 0 observations
+```
+
+### Performance
+
+- Fast: ~2-3 observations per second
+- 100 observations: ~30-50 seconds
+- 1000 observations: ~5-8 minutes
+
+## Chroma Inspection Tools
+
+Helper scripts to inspect what's in your Chroma vector database.
+
+### Quick Stats
+
+```bash
+npm run chroma:stats
+```
+
+Shows:
+- Collections and dimensions
+- Embeddings by type (Observations, Summaries, Prompts)
+- Total counts
+- Recent activity
+
+**Example Output:**
+```
+📊 Chroma Vector Database Statistics
+
+Collections:
+  • cm__claude-mem (384D embeddings)
+
+Embeddings by Type:
+  Observations:        15,888
+  Session Summaries:   1,379
+  User Prompts:        542
+
+Total:
+  All embeddings:      17,809
+```
+
+### Inspect Specific Observation
+
+```bash
+npm run chroma:inspect 13615
+```
+
+Shows all chunks stored for a specific observation.
+
+**Example Output:**
+```
+🔍 Searching Chroma for: 13615
+
+Embeddings found:
+  • obs_13615_fact_0
+    Created: 2025-12-17 09:10:01
+  • obs_13615_fact_1
+    Created: 2025-12-17 09:10:01
+  • obs_13615_fact_2
+    Created: 2025-12-17 09:10:01
+  • obs_13615_narrative
+    Created: 2025-12-17 09:10:01
+
+Total chunks: 4
+```
+
+## Complete Workflow: New Computer Setup
+
+When setting up claude-mem on a new computer with existing conversation history:
+
+```bash
+# 1. Install claude-mem
+claude plugin install thedotmack/claude-mem
+
+# 2. Go to plugin directory
+cd ~/.claude/plugins/marketplaces/thedotmack
+
+# 3. Import all history (includes Chroma sync)
+bun src/bin/replay-history.ts --all
+
+# 4. Verify import
+npm run chroma:stats
+
+# 5. Test search in Claude Code
+# Ask Claude: "What did we work on in October?"
+```
+
+**Total Time:** 30-120 minutes depending on history size
+
+## Troubleshooting
+
+### "Session already imported, skipping"
+
+The script detected an existing session record in the database. To force re-import:
+
+```bash
+# Delete the specific project's data first
+sqlite3 ~/.claude-mem/claude-mem.db "
+DELETE FROM observations WHERE project = 'myproject';
+DELETE FROM session_summaries WHERE project = 'myproject';
+DELETE FROM sdk_sessions WHERE project = 'myproject';
+"
+
+# Then re-import
+bun src/bin/replay-history.ts ~/.claude/projects/-path-to-myproject
+```
+
+### Chroma Sync Fails
+
+If Chroma sync fails during replay-history:
+
+```bash
+# 1. Import without Chroma first (faster)
+bun src/bin/replay-history.ts --all --no-chroma
+
+# 2. Then backfill Chroma separately
+bun scripts/backfill-chroma.ts
+```
+
+### Worker Must Be Running
+
+Both scripts require the claude-mem worker to be running for Chroma sync:
+
+```bash
+# Check worker status
+npm run worker:status
+
+# Start if not running
+npm run worker:start
+```
+
+### Agent SDK Errors
+
+If you see "max_tokens must be greater than thinking.budget_tokens":
+
+The scripts automatically unset conflicting environment variables. If errors persist:
+
+```bash
+# Unset manually before running
+unset MAX_THINKING_TOKENS
+unset CLAUDE_CODE_MAX_OUTPUT_TOKENS
+
+# Then run script
+bun src/bin/replay-history.ts --all
+```
+
+## Architecture Notes
+
+### Single Collection Design
+
+All projects share a single Chroma collection: `cm__claude-mem`
+
+- Project names stored in **metadata**, not separate collections
+- Enables cross-project semantic search
+- Simplifies management (one collection to maintain)
+
+### Embedding Structure
+
+Each observation becomes multiple embeddings:
+- `obs_{id}_narrative` - Main narrative text
+- `obs_{id}_fact_0`, `fact_1`, ... - Individual facts
+- `obs_{id}_text` - Legacy field (rarely used)
+
+Each summary becomes 6 embeddings:
+- `summary_{id}_request` - User request
+- `summary_{id}_investigated` - What was investigated
+- `summary_{id}_learned` - What was learned
+- `summary_{id}_completed` - What was completed
+- `summary_{id}_next_steps` - Next steps
+- `summary_{id}_notes` - Additional notes
+
+### Why Separate Chunks?
+
+Granular chunking enables precise semantic search:
+- Find specific facts without matching entire observation
+- Retrieve relevant summary sections only
+- Better relevance scoring
+
+## See Also
+
+- [Memory Export/Import](/usage/export-import) - Export specific memory sets for sharing
+- [Search Tools](/usage/search-tools) - Query your imported history
+- [Configuration](/configuration) - Model and port settings
