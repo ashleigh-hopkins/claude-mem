@@ -54,7 +54,7 @@ export function SessionSelector({
       >
         <option value="">All Sessions</option>
         {sessions.map((session) => (
-          <option key={session.sdk_session_id} value={session.sdk_session_id}>
+          <option key={session.session_id} value={session.session_id}>
             {formatDate(session.created_at_epoch)} - {truncate(session.request, 50)}
           </option>
         ))}

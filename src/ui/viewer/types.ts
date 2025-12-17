@@ -30,7 +30,7 @@ export interface Summary {
 
 export interface SessionSummary {
   id: number;
-  sdk_session_id: string;
+  session_id: string; // API returns session_id (same value as sdk_session_id in observations)
   project: string;
   request: string | null;
   investigated: string | null;

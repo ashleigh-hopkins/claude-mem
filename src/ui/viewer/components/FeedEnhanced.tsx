@@ -78,7 +78,14 @@ export function FeedEnhanced({
   // Filter observations by session if needed
   const filteredObservations = useMemo(() => {
     if (!sessionFilter) return observations;
-    return observations.filter(o => o.sdk_session_id === sessionFilter);
+    const filtered = observations.filter(o => o.sdk_session_id === sessionFilter);
+    console.log('[FeedEnhanced] Session filter applied:', {
+      sessionFilter,
+      totalObservations: observations.length,
+      filteredCount: filtered.length,
+      sampleIds: filtered.slice(0, 3).map(o => o.id)
+    });
+    return filtered;
   }, [observations, sessionFilter]);
 
   // Detect pivots

@@ -34,7 +34,7 @@ export function App() {
   // Find selected session summary
   const selectedSessionSummary = useMemo(() => {
     if (!urlState.state.session || !sessions) return null;
-    return sessions.find(s => s.sdk_session_id === urlState.state.session) || null;
+    return sessions.find(s => s.session_id === urlState.state.session) || null;
   }, [urlState.state.session, sessions]);
 
   // When filtering by project: ONLY use paginated data (API-filtered)
@@ -54,10 +54,6 @@ export function App() {
       );
     }
 
-    // Apply session filter
-    if (urlState.state.session) {
-      items = items.filter(o => o.sdk_session_id === urlState.state.session);
-    }
 
     return items;
   }, [observations, paginatedObservations, urlState.state.project, urlState.state.search, urlState.state.session]);
@@ -67,10 +63,7 @@ export function App() {
       ? paginatedSummaries
       : mergeAndDeduplicateByProject(summaries, paginatedSummaries);
 
-    // Apply session filter
-    if (urlState.state.session) {
       items = items.filter(s => s.session_id === urlState.state.session);
-    }
 
     return items;
   }, [summaries, paginatedSummaries, urlState.state.project, urlState.state.session]);
@@ -80,10 +73,7 @@ export function App() {
       ? paginatedPrompts
       : mergeAndDeduplicateByProject(prompts, paginatedPrompts);
 
-    // Apply session filter
-    if (urlState.state.session) {
       items = items.filter(p => p.claude_session_id === urlState.state.session);
-    }
 
     return items;
   }, [prompts, paginatedPrompts, urlState.state.project, urlState.state.session]);
