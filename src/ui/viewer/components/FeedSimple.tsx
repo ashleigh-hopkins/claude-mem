@@ -49,6 +49,7 @@ export function FeedSimple({
       (entries) => {
         const first = entries[0];
         if (first.isIntersecting && hasMore && !isLoading) {
+          console.log('[FeedSimple] Intersection observer triggered load');
           onLoadMoreRef.current?.();
         }
       },
@@ -56,6 +57,16 @@ export function FeedSimple({
     );
 
     observer.observe(element);
+
+    // Trigger immediate load if element is already visible and we have more
+    if (hasMore && !isLoading) {
+      const rect = element.getBoundingClientRect();
+      const isVisible = rect.top < window.innerHeight;
+      if (isVisible) {
+        console.log('[FeedSimple] Element already visible, triggering immediate load');
+        onLoadMoreRef.current?.();
+      }
+    }
 
     return () => {
       if (element) {
