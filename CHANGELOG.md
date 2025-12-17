@@ -4,31 +4,140 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [8.0.0] - 2025-12-14
+## [7.3.3] - 2025-12-16
 
-### Fixed
+## What's Changed
 
-**Timeline MCP Tools Parameter Bug**
+- Remove all better-sqlite3 references from codebase (#357)
 
-Fixed critical bug where timeline tools were completely non-functional due to parameter name mismatch between MCP layer and SearchManager. The tools now use correct parameter names:
-- `anchor` (was incorrectly `anchor_id`)
-- `depth_before` (was incorrectly `before`)
-- `depth_after` (was incorrectly `after`)
-- `type` (was incorrectly `obs_type` in timeline tool only)
+**Full Changelog**: https://github.com/thedotmack/claude-mem/compare/v7.3.2...v7.3.3
 
-**Affected Tools:** `timeline`, `get_context_timeline`, `get_timeline_by_query`
+## [7.3.2] - 2025-12-16
 
-**Impact:** These tools were previously broken and would fail with "Cannot read properties of undefined (reading 'length')" errors. They now work correctly with the proper parameter names that match the underlying SearchManager implementation.
+## 🪟 Windows Console Fix
 
-### Added
-- New `get_batch_observations` MCP tool for efficiently fetching multiple observations in a single request
-- Enhanced SessionStore methods for fetching prompts and session summaries by ID
+Fixes blank console windows appearing for Windows 11 users during claude-mem operations.
 
-### Changed
-- Extracted magic numbers to constants (`RECENCY_WINDOW_DAYS`, `RECENCY_WINDOW_MS`)
-- Replaced debug logging calls with proper logger methods
+### What Changed
+
+- **Windows**: Uses PowerShell `Start-Process -WindowStyle Hidden` to properly hide worker process
+- **Security**: Added PowerShell string escaping to follow security best practices
+- **Unix/Mac**: No changes (continues to work as before)
+
+### Root Cause
+
+The issue was caused by a Node.js limitation where `windowsHide: true` doesn't work with `detached: true` in `child_process.spawn()`. This affects both Bun and Node.js since Bun inherits Node.js process spawning semantics.
+
+See: https://github.com/nodejs/node/issues/21825
+
+### Security Note
+
+While all paths in the PowerShell command are application-controlled (not user input), we've added proper escaping to follow security best practices. If an attacker could modify bun installation paths or plugin directories, they would already have full filesystem access including the database.
+
+### Related
+
+- Fixes #304 (Multiple visible console windows)
+- Merged PR #339
+- Testing documented in PR #315
+
+### Breaking Changes
+
+None - fully backward compatible.
 
 ---
+
+**Full Changelog**: https://github.com/thedotmack/claude-mem/compare/v7.3.1...v7.3.2
+
+## [7.3.1] - 2025-12-16
+
+## 🐛 Bug Fixes
+
+### Pending Messages Cleanup (Issue #353)
+
+Fixed unbounded database growth in the `pending_messages` table by implementing proper cleanup logic:
+
+- **Content Clearing**: `markProcessed()` now clears `tool_input` and `tool_response` when marking messages as processed, preventing duplicate storage of transcript data that's already saved in observations
+- **Count-Based Retention**: `cleanupProcessed()` now keeps only the 100 most recent processed messages for UI display, deleting older ones automatically
+- **Automatic Cleanup**: Cleanup runs automatically after processing messages in `SDKAgent.processSDKResponse()`
+
+### What This Fixes
+
+- Prevents database from growing unbounded with duplicate transcript content
+- Keeps metadata (tool_name, status, timestamps) for recent messages
+- Maintains UI functionality while optimizing storage
+
+### Technical Details
+
+**Files Modified:**
+- `src/services/sqlite/PendingMessageStore.ts` - Cleanup logic implementation
+- `src/services/worker/SDKAgent.ts` - Periodic cleanup calls
+
+**Database Behavior:**
+- Pending/processing messages: Keep full transcript data (needed for processing)
+- Processed messages: Clear transcript, keep metadata only (observations already saved)
+- Retention: Last 100 processed messages for UI feedback
+
+### Related
+
+- Fixes #353 - Observations not being saved
+- Part of the pending messages persistence feature (from PR #335)
+
+---
+
+**Full Changelog**: https://github.com/thedotmack/claude-mem/compare/v7.3.0...v7.3.1
+
+## [7.3.0] - 2025-12-16
+
+## Features
+
+- **Table-based search output**: Unified timeline formatting with cleaner, more organized presentation of search results grouped by date and file
+- **Simplified API**: Removed unused format parameter from MCP search tools for cleaner interface
+- **Shared formatting utilities**: Extracted common timeline formatting logic into reusable module
+- **Batch observations endpoint**: Added `/api/observations/batch` endpoint for efficient retrieval of multiple observations by ID array
+
+## Changes
+
+- **Default model upgrade**: Changed default model from Haiku to Sonnet for better observation quality
+- **Removed fake URIs**: Replaced claude-mem:// pseudo-protocol with actual HTTP API endpoints for citations
+
+## Bug Fixes
+
+- Fixed undefined debug function calls in MCP server
+- Fixed skillPath variable scoping bug in instructions endpoint
+- Extracted magic numbers to named constants for better code maintainability
+
+**Full Changelog**: https://github.com/thedotmack/claude-mem/compare/v7.2.4...v7.3.0
+
+## [7.2.4] - 2025-12-15
+
+## What's Changed
+
+### Documentation
+- Updated endless mode setup instructions with improved configuration guidance for better user experience
+
+**Full Changelog**: https://github.com/thedotmack/claude-mem/compare/v7.2.3...v7.2.4
+
+## [7.2.3] - 2025-12-15
+
+## Bug Fixes
+
+- **Fix MCP server failures on plugin updates**: Add 2-second pre-restart delay in `ensureWorkerVersionMatches()` to give files time to sync before killing the old worker. This prevents the race condition where the worker restart happened too quickly after plugin file updates, causing "Worker service connection failed" errors.
+
+## Changes
+
+- Add `PRE_RESTART_SETTLE_DELAY` constant (2000ms) to `hook-constants.ts`
+- Add delay before `ProcessManager.restart()` call in `worker-utils.ts`
+- Fix pre-existing bug where `port` variable was undefined in error logging
+
+## [7.2.2] - 2025-12-15
+
+## Changes
+
+- **Refactor:** Consolidate mem-search skill, remove desktop-skill duplication
+  - Delete separate `desktop-skill/` directory (was outdated)
+  - Generate `mem-search.zip` during build from `plugin/skills/mem-search/`
+  - Update docs with correct MCP tool list and new download path
+  - Single source of truth for Claude Desktop skill
 
 ## [7.2.1] - 2025-12-14
 
