@@ -16,30 +16,39 @@ This guide covers installing claude-mem from your fork (ashleigh-hopkins/claude-
 Install directly from your fork's repository:
 
 ```bash
-# 1. Create plugin directory
-mkdir -p ~/.claude/plugins/marketplaces/thedotmack
+# One-line install command:
+mkdir -p ~/.claude/plugins/marketplaces/thedotmack && \
+git clone https://github.com/ashleigh-hopkins/claude-mem.git \
+  ~/.claude/plugins/marketplaces/thedotmack && \
+cd ~/.claude/plugins/marketplaces/thedotmack && \
+git checkout feature/recovered-historical-import && \
+npm install && \
+npm run build && \
+npm run sync-marketplace:force && \
+npm run register-fork && \
+npm run worker:start
+```
 
-# 2. Clone your fork
+**Or step-by-step:**
+
+```bash
+# 1. Clone your fork
 git clone https://github.com/ashleigh-hopkins/claude-mem.git \
   ~/.claude/plugins/marketplaces/thedotmack
 
-# 3. Checkout your feature branch (if needed)
+# 2. Setup (checkout branch, build, register, start)
 cd ~/.claude/plugins/marketplaces/thedotmack
 git checkout feature/recovered-historical-import
-
-# 4. Install dependencies and build
 npm install
 npm run build
-
-# 5. Sync to marketplace
 npm run sync-marketplace:force
-
-# 6. Start the worker
+npm run register-fork  # Registers with Claude Code
 npm run worker:start
 ```
 
 **Notes:**
 - Uses the standard plugin location that Claude Code expects
+- Step 6 updates `~/.claude/plugins/installed_plugins.json` so Claude recognizes the fork
 - Keeps git history so you can pull updates
 - Allows switching branches easily
 
@@ -56,11 +65,14 @@ unzip claude-mem-feature-recovered-historical-import.zip
 mv claude-mem-feature-recovered-historical-import \
   ~/.claude/plugins/marketplaces/thedotmack
 
-# 3. Build and start
+# 3. Build and register
 cd ~/.claude/plugins/marketplaces/thedotmack
 npm install
 npm run build
 npm run sync-marketplace:force
+bash scripts/register-fork.sh
+
+# 4. Start worker
 npm run worker:start
 ```
 
@@ -72,11 +84,12 @@ If you already have the repo cloned elsewhere:
 # If you have the repo at ~/Projects/claude-mem
 ln -s ~/Projects/claude-mem ~/.claude/plugins/marketplaces/thedotmack
 
-# Then build and sync
+# Then build, register, and start
 cd ~/.claude/plugins/marketplaces/thedotmack
 npm install
 npm run build
 npm run sync-marketplace:force
+bash scripts/register-fork.sh
 npm run worker:start
 ```
 
