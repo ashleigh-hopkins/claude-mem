@@ -95,31 +95,70 @@ npm run worker:start
 
 ## Verification
 
-Check that the fork is installed correctly:
+Run the comprehensive verification script:
 
 ```bash
 cd ~/.claude/plugins/marketplaces/thedotmack
-
-# 1. Check git remote
-git remote -v
-# Should show: origin https://github.com/ashleigh-hopkins/claude-mem.git
-
-# 2. Check current branch
-git branch --show-current
-# Should show: feature/recovered-historical-import
-
-# 3. Check worker status
-npm run worker:status
-# Should show: Worker is running
-
-# 4. Check version
-curl http://localhost:37777/api/version
-# Should show: {"version":"7.3.4"}
-
-# 5. Test context injection
-npm run test:context
-# Should inject context in a test session
+npm run verify-fork
 ```
+
+This checks:
+- ✅ Installation path
+- ✅ Git remote (should be your fork)
+- ✅ Current branch
+- ✅ Version
+- ✅ Registration with Claude Code
+- ✅ Worker status
+- ✅ Hooks configuration
+- ✅ Worker API responding
+
+**Expected output:**
+```
+=== Claude-Mem Fork Verification ===
+
+1. Installation path:
+   ✓ ~/.claude/plugins/marketplaces/thedotmack
+
+2. Git remote:
+   origin → https://github.com/ashleigh-hopkins/claude-mem.git
+
+3. Current branch:
+   feature/recovered-historical-import
+
+4. Version:
+   7.3.4
+
+5. Registered with Claude Code:
+   ✓ Registered in installed_plugins.json
+
+6. Worker status:
+   Worker is running
+     PID: 12345
+     Port: 37777
+
+7. Hooks installed:
+   ✓ hooks.json exists
+   5 lifecycle hooks configured
+
+8. Worker API:
+   ✓ Worker responding on port 37777
+   Version: 7.3.4
+
+=== Summary ===
+✅ Fork is installed and working!
+```
+
+### Why Fork Doesn't Show in Marketplace List
+
+**Important:** Running `claude plugin marketplace list` shows marketplace **sources** (repositories), not individual plugins.
+
+Your fork is installed **directly**, not through a marketplace, so it won't appear in that list. This is normal and expected.
+
+**To verify it's actually working:**
+1. ✅ Run `npm run verify-fork` (shows all checks)
+2. ✅ Visit http://localhost:37777 (web UI should load)
+3. ✅ In Claude Code, the hooks will capture context automatically
+4. ✅ Use the mem-search skill to test: "What did we work on recently?"
 
 ## Updating Your Fork
 
