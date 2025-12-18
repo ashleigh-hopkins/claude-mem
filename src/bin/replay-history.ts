@@ -460,68 +460,133 @@ async function replaySession(
 
   console.log(`  ✓ Stored ${stats.prompts} user prompts`);
 
-  // Generate and store observations from tool events (single persistent SDK session)
+  // Generate and store observations from tool events
+  // Smart chunking: sessions >150 tools split into chunks to prevent SDK context exhaustion
   if (sessionData.toolEvents.length > 0) {
-    console.log(`  ⏳ Generating observations from ${sessionData.toolEvents.length} tool events using single persistent SDK session...`);
+    const MAX_TOOLS_PER_CHUNK = 150;
+    const totalTools = sessionData.toolEvents.length;
 
-    try {
-      // Process ALL tools in ONE SDK session (matches real claude-mem behavior)
-      // SDK receives all tools streamed individually and decides natural observation grouping
-      const observations = await generateObservations(
-        sessionData.toolEvents,
-        sessionData.userMessages[0]?.text || '',
-        sessionData.project,
-        sessionId,
-        modelId,
-        claudePath
-      );
+    if (totalTools > MAX_TOOLS_PER_CHUNK) {
+      // Large session: split into chunks
+      const numChunks = Math.ceil(totalTools / MAX_TOOLS_PER_CHUNK);
+      console.log(`  ⏳ Generating observations from ${totalTools} tool events using smart chunking (${numChunks} chunks of max ${MAX_TOOLS_PER_CHUNK} tools)...`);
 
-      console.log(`    SDK generated ${observations.length} observations`);
+      for (let chunkIdx = 0; chunkIdx < numChunks; chunkIdx++) {
+        const startIdx = chunkIdx * MAX_TOOLS_PER_CHUNK;
+        const endIdx = Math.min(startIdx + MAX_TOOLS_PER_CHUNK, totalTools);
+        const chunkTools = sessionData.toolEvents.slice(startIdx, endIdx);
 
-      // Store observations with correct prompt number attribution
-      // Tools maintain their prompt numbers during parsing, observations inherit from their tool
-      let toolIndex = 0;
-      for (const obs of observations) {
-        // Observations typically align with tools in order
-        // Use tool's timestamp and prompt number for attribution
-        const tool = sessionData.toolEvents[toolIndex] || sessionData.toolEvents[0];
-        const timestamp = tool.timestamp;
-        const promptNum = tool.promptNumber || 1;
+        console.log(`    Processing chunk ${chunkIdx + 1}/${numChunks} (tools ${startIdx + 1}-${endIdx})...`);
 
-        const result = db.storeHistoricalObservation(
-          sessionId,  // Use original session ID
-          sessionData.project,
-          obs,
-          timestamp,
-          promptNum,  // Tool's prompt number
-          0  // discoveryTokens
-        );
+        try {
+          const observations = await generateObservations(
+            chunkTools,
+            sessionData.userMessages[0]?.text || '',
+            sessionData.project,
+            sessionId,
+            modelId,
+            claudePath
+          );
 
-        // Sync to Chroma if enabled
-        if (chromaSync) {
-          try {
-            await chromaSync.syncObservation(
-              result.id,
-              sessionId,  // Use original session ID
+          console.log(`      SDK generated ${observations.length} observations for this chunk`);
+
+          // Store observations with correct attribution
+          for (let i = 0; i < observations.length; i++) {
+            const obs = observations[i];
+            const toolIdx = Math.min(startIdx + i, totalTools - 1);
+            const tool = sessionData.toolEvents[toolIdx];
+            const timestamp = tool.timestamp;
+            const promptNum = tool.promptNumber || 1;
+
+            const result = db.storeHistoricalObservation(
+              sessionId,
               sessionData.project,
               obs,
+              timestamp,
               promptNum,
-              result.createdAtEpoch,
-              0  // discoveryTokens
+              0
             );
-          } catch (error: any) {
-            console.error(`      ⚠️  Chroma sync failed for observation #${result.id}: ${error.message}`);
-            // Continue even if Chroma sync fails
-          }
-        }
 
-        stats.observations++;
-        toolIndex++;
+            if (chromaSync) {
+              try {
+                await chromaSync.syncObservation(
+                  result.id,
+                  sessionId,
+                  sessionData.project,
+                  obs,
+                  promptNum,
+                  result.createdAtEpoch,
+                  0
+                );
+              } catch (error: any) {
+                console.error(`        ⚠️  Chroma sync failed for observation #${result.id}: ${error.message}`);
+              }
+            }
+
+            stats.observations++;
+          }
+        } catch (error: any) {
+          console.error(`      ❌ Chunk ${chunkIdx + 1} failed:`, error.message);
+        }
       }
 
-      console.log(`  ✓ Generated and stored ${stats.observations} observations`);
-    } catch (error: any) {
-      console.error(`    ❌ Failed to generate observations:`, error.message);
+      console.log(`  ✓ Generated and stored ${stats.observations} observations across ${numChunks} chunks`);
+    } else {
+      // Small session: single persistent SDK session (matches real claude-mem behavior)
+      console.log(`  ⏳ Generating observations from ${totalTools} tool events using single persistent SDK session...`);
+
+      try {
+        const observations = await generateObservations(
+          sessionData.toolEvents,
+          sessionData.userMessages[0]?.text || '',
+          sessionData.project,
+          sessionId,
+          modelId,
+          claudePath
+        );
+
+        console.log(`    SDK generated ${observations.length} observations`);
+
+        // Store observations with correct prompt number attribution
+        let toolIndex = 0;
+        for (const obs of observations) {
+          const tool = sessionData.toolEvents[toolIndex] || sessionData.toolEvents[0];
+          const timestamp = tool.timestamp;
+          const promptNum = tool.promptNumber || 1;
+
+          const result = db.storeHistoricalObservation(
+            sessionId,
+            sessionData.project,
+            obs,
+            timestamp,
+            promptNum,
+            0
+          );
+
+          if (chromaSync) {
+            try {
+              await chromaSync.syncObservation(
+                result.id,
+                sessionId,
+                sessionData.project,
+                obs,
+                promptNum,
+                result.createdAtEpoch,
+                0
+              );
+            } catch (error: any) {
+              console.error(`      ⚠️  Chroma sync failed for observation #${result.id}: ${error.message}`);
+            }
+          }
+
+          stats.observations++;
+          toolIndex++;
+        }
+
+        console.log(`  ✓ Generated and stored ${stats.observations} observations`);
+      } catch (error: any) {
+        console.error(`    ❌ Failed to generate observations:`, error.message);
+      }
     }
   }
 
