@@ -664,20 +664,45 @@ async function processProject(
   const files = readdirSync(projectDir).filter(f => f.endsWith('.jsonl'));
   console.log(`Found ${files.length} transcript file(s)`);
 
-  const allEvents: TranscriptEvent[] = [];
+  // Process transcripts incrementally to avoid memory exhaustion
+  // (thedotmack has 303 files - can't load all into memory at once)
+  const sessions = new Map<string, SessionData>();
 
-  // Extract events from all transcripts
   for (const filename of files) {
     const filepath = join(projectDir, filename);
     const events = parseTranscript(filepath);
-    allEvents.push(...events);
+
+    // Group events from this file by session
+    const fileSessions = groupBySession(events);
+
+    // Merge with existing sessions (events from same session across multiple files)
+    for (const [sessionId, fileSession] of fileSessions) {
+      if (sessions.has(sessionId)) {
+        // Merge into existing session
+        const existing = sessions.get(sessionId)!;
+        existing.userMessages.push(...fileSession.userMessages);
+        existing.toolEvents.push(...fileSession.toolEvents);
+        existing.allMessages.push(...fileSession.allMessages);
+        existing.assistantResponses.push(...fileSession.assistantResponses);
+
+        // Use earliest start time
+        if (fileSession.startTime < existing.startTime) {
+          existing.startTime = fileSession.startTime;
+        }
+      } else {
+        // New session
+        sessions.set(sessionId, fileSession);
+      }
+    }
   }
 
-  // Sort by timestamp
-  allEvents.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+  // Sort messages within each session by timestamp
+  for (const session of sessions.values()) {
+    session.allMessages.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    session.userMessages.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+    session.toolEvents.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+  }
 
-  // Group by session
-  const sessions = groupBySession(allEvents);
   console.log(`Found ${sessions.size} session(s)`);
 
   // Limit sessions if requested
