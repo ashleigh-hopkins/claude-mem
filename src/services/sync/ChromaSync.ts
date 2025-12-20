@@ -131,6 +131,11 @@ export class ChromaSync {
       });
 
       await this.client.connect(this.transport);
+
+      // CRITICAL: chroma-mcp needs time after handshake before accepting tool calls
+      // Without delay: "RuntimeError: Received request before initialization was complete"
+      await new Promise(resolve => setTimeout(resolve, 500)); // 500ms
+
       this.connected = true;
 
       logger.info('CHROMA_SYNC', 'Connected to Chroma MCP server', { project: this.project });
