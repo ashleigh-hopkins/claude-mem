@@ -30,8 +30,10 @@ export class DatabaseManager {
     // Initialize ChromaSync
     this.chromaSync = new ChromaSync('claude-mem');
 
-    // Start background backfill (fire-and-forget)
-    this.chromaSync.ensureBackfilled();
+    // Start background backfill (fire-and-forget, with error logging)
+    this.chromaSync.ensureBackfilled().catch((error) => {
+      logger.error('DB', 'Chroma backfill failed (non-fatal)', {}, error);
+    });
 
     logger.info('DB', 'Database initialized');
   }

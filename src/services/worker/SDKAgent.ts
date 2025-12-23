@@ -212,6 +212,9 @@ export class SDKAgent {
           session.lastPromptNumber = message.prompt_number;
         }
 
+        // Track timestamp for storing observations with correct historical time
+        session.currentMessageTimestamp = message._originalTimestamp;
+
         yield {
           type: 'user',
           message: {
@@ -261,13 +264,27 @@ export class SDKAgent {
 
     // Store observations
     for (const obs of observations) {
-      const { id: obsId, createdAtEpoch } = this.dbManager.getSessionStore().storeObservation(
-        session.claudeSessionId,
-        session.project,
-        obs,
-        session.lastPromptNumber,
-        discoveryTokens
-      );
+      // Use historical timestamp if available (from replay), otherwise current time
+      const timestamp = session.currentMessageTimestamp
+        ? new Date(session.currentMessageTimestamp)
+        : undefined;
+
+      const { id: obsId, createdAtEpoch } = timestamp
+        ? this.dbManager.getSessionStore().storeHistoricalObservation(
+            session.claudeSessionId,
+            session.project,
+            obs,
+            timestamp,
+            session.lastPromptNumber,
+            discoveryTokens
+          )
+        : this.dbManager.getSessionStore().storeObservation(
+            session.claudeSessionId,
+            session.project,
+            obs,
+            session.lastPromptNumber,
+            discoveryTokens
+          );
 
       // Log observation details
       logger.info('SDK', 'Observation saved', {

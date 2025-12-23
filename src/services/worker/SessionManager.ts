@@ -171,7 +171,12 @@ export class SessionManager {
     };
 
     try {
-      const messageId = this.getPendingStore().enqueue(sessionDbId, session.claudeSessionId, message);
+      const messageId = this.getPendingStore().enqueue(
+        sessionDbId,
+        session.claudeSessionId,
+        message,
+        data.timestamp  // Optional: for historical imports
+      );
       logger.debug('SESSION', `Observation persisted to DB`, {
         sessionId: sessionDbId,
         messageId,
@@ -431,6 +436,16 @@ export class SessionManager {
         }
 
         if (!gotMessage) {
+          // Before exiting, check if there are still pending messages
+          const finalCheck = this.getPendingStore().peekPending(sessionDbId);
+          if (finalCheck) {
+            // Still have work to do, continue instead of exiting
+            logger.info('SESSION', 'Linger timeout but pending messages exist, continuing', {
+              sessionId: sessionDbId
+            });
+            continue;
+          }
+
           // Timeout or abort - exit the loop
           logger.info('SESSION', `Generator exiting after linger timeout`, { sessionId: sessionDbId });
           return;

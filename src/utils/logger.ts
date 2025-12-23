@@ -4,6 +4,9 @@
  */
 
 import { SettingsDefaultsManager } from '../shared/SettingsDefaultsManager.js';
+import { createWriteStream, WriteStream } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
 
 export enum LogLevel {
   DEBUG = 0,
@@ -25,10 +28,16 @@ interface LogContext {
 class Logger {
   private level: LogLevel | null = null;
   private useColor: boolean;
+  private logStream: WriteStream | null = null;
 
   constructor() {
     // Disable colors when output is not a TTY (e.g., PM2 logs)
     this.useColor = process.stdout.isTTY ?? false;
+
+    // Write logs to file directly (survives parent process exit)
+    const date = new Date().toISOString().slice(0, 10);
+    const logFile = join(homedir(), '.claude-mem', 'logs', `worker-${date}.log`);
+    this.logStream = createWriteStream(logFile, { flags: 'a' });
   }
 
   /**
@@ -217,13 +226,18 @@ class Logger {
       }
     }
 
-    const logLine = `[${timestamp}] [${levelStr}] [${componentStr}] ${correlationStr}${message}${contextStr}${dataStr}`;
+    const logLine = `[${timestamp}] [${levelStr}] [${componentStr}] ${correlationStr}${message}${contextStr}${dataStr}\n`;
 
-    // Output to appropriate stream
+    // Write directly to file stream (survives parent process exit)
+    if (this.logStream) {
+      this.logStream.write(logLine);
+    }
+
+    // Also write to console for parent process while it exists
     if (level === LogLevel.ERROR) {
-      console.error(logLine);
+      console.error(logLine.trimEnd());
     } else {
-      console.log(logLine);
+      console.log(logLine.trimEnd());
     }
   }
 

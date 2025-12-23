@@ -246,7 +246,7 @@ export class SessionRoutes extends BaseRouteHandler {
    * Body: { claudeSessionId, tool_name, tool_input, tool_response, cwd }
    */
   private handleObservationsByClaudeId = this.wrapHandler((req: Request, res: Response): void => {
-    const { claudeSessionId, tool_name, tool_input, tool_response, cwd } = req.body;
+    const { claudeSessionId, tool_name, tool_input, tool_response, cwd, timestamp } = req.body;
 
     if (!claudeSessionId) {
       return this.badRequest(res, 'Missing claudeSessionId');
@@ -318,7 +318,8 @@ export class SessionRoutes extends BaseRouteHandler {
         { sessionId: sessionDbId },
         { tool_name },
         ''
-      )
+      ),
+      timestamp: timestamp  // Optional: for historical imports
     });
 
     // Ensure SDK agent is running
@@ -423,7 +424,7 @@ export class SessionRoutes extends BaseRouteHandler {
    * Returns: { sessionDbId, promptNumber, skipped: boolean, reason?: string }
    */
   private handleSessionInitByClaudeId = this.wrapHandler((req: Request, res: Response): void => {
-    const { claudeSessionId, project, prompt } = req.body;
+    const { claudeSessionId, project, prompt, timestamp } = req.body;
 
     // Validate required parameters
     if (!this.validateRequired(req, res, ['claudeSessionId', 'project', 'prompt'])) {
@@ -458,8 +459,12 @@ export class SessionRoutes extends BaseRouteHandler {
       return;
     }
 
-    // Step 5: Save cleaned user prompt
-    store.saveUserPrompt(claudeSessionId, promptNumber, cleanedPrompt);
+    // Step 5: Save cleaned user prompt (use historical method if timestamp provided)
+    if (timestamp) {
+      store.saveHistoricalUserPrompt(claudeSessionId, promptNumber, cleanedPrompt, new Date(timestamp));
+    } else {
+      store.saveUserPrompt(claudeSessionId, promptNumber, cleanedPrompt);
+    }
 
     logger.info('SESSION', 'Session initialized via HTTP', {
       sessionId: sessionDbId,

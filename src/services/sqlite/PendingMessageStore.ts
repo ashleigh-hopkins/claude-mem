@@ -52,8 +52,8 @@ export class PendingMessageStore {
    * Enqueue a new message (persist before processing)
    * @returns The database ID of the persisted message
    */
-  enqueue(sessionDbId: number, claudeSessionId: string, message: PendingMessage): number {
-    const now = Date.now();
+  enqueue(sessionDbId: number, claudeSessionId: string, message: PendingMessage, timestamp?: number): number {
+    const now = timestamp || Date.now();
     const stmt = this.db.prepare(`
       INSERT INTO pending_messages (
         session_db_id, claude_session_id, message_type,

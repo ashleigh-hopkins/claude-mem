@@ -6,6 +6,9 @@
  * See src/services/worker/README.md for architecture details.
  */
 
+// MUST be imported first - fixes Agent SDK env var conflicts
+import '../utils/agent-sdk-env-fix.js';
+
 import express from 'express';
 import http from 'http';
 import path from 'path';
