@@ -122,21 +122,31 @@ export class SessionRoutes extends BaseRouteHandler {
       });
     }
 
-    // Start SDK agent in background (pass worker ref for spinner control)
-    logger.info('SESSION', 'Generator starting', {
-      sessionId: sessionDbId,
-      project: session.project,
-      promptNum: session.lastPromptNumber
-    });
-
-    session.generatorPromise = this.sdkAgent.startSession(session, this.workerService)
-      .finally(() => {
-        // Clear generator reference when completed
-        logger.info('SESSION', `Generator finished`, { sessionId: sessionDbId });
-        session.generatorPromise = null;
-        // Broadcast status change (generator finished, may stop spinner)
-        this.workerService.broadcastProcessingStatus();
+    // Start SDK agent in background if not already running
+    if (!session.generatorPromise) {
+      logger.info('SESSION', 'Generator starting', {
+        sessionId: sessionDbId,
+        project: session.project,
+        promptNum: session.lastPromptNumber
       });
+
+      session.generatorPromise = this.sdkAgent.startSession(session, this.workerService)
+        .catch(err => {
+          logger.failure('SDK', 'SDK agent error', { sessionId: sessionDbId }, err);
+        })
+        .finally(() => {
+          // Clear generator reference when completed
+          logger.info('SESSION', `Generator finished`, { sessionId: sessionDbId });
+          session.generatorPromise = null;
+          // Broadcast status change (generator finished, may stop spinner)
+          this.workerService.broadcastProcessingStatus();
+        });
+    } else {
+      logger.debug('SESSION', 'Generator already running, skipping start', {
+        sessionId: sessionDbId,
+        promptNum: session.lastPromptNumber
+      });
+    }
 
     // Broadcast session started event
     this.eventBroadcaster.broadcastSessionStarted(sessionDbId, session.project);
