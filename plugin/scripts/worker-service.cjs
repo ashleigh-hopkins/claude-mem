@@ -454,7 +454,18 @@ ${e.stack}`:e.message;if(Array.isArray(e))return`[${e.length} items]`;let r=Obje
       (sdk_session_id, project, request, investigated, learned, completed,
        next_steps, notes, prompt_number, discovery_tokens, created_at, created_at_epoch)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(e,r,n.request,n.investigated,n.learned,n.completed,n.next_steps,n.notes,i||null,a,s.toISOString(),o);return{id:Number(d.lastInsertRowid),createdAtEpoch:o}}markSessionCompleted(e){let r=new Date,n=r.getTime();this.db.prepare(`
+    `).run(e,r,n.request,n.investigated,n.learned,n.completed,n.next_steps,n.notes,i||null,a,s.toISOString(),o);return{id:Number(d.lastInsertRowid),createdAtEpoch:o}}storeHistoricalSummary(e,r,n,i,a,s=0){let o=i.getTime();this.db.prepare(`
+      SELECT id FROM sdk_sessions WHERE sdk_session_id = ?
+    `).get(e)||(this.db.prepare(`
+        INSERT INTO sdk_sessions
+        (claude_session_id, sdk_session_id, project, started_at, started_at_epoch, status)
+        VALUES (?, ?, ?, ?, ?, 'active')
+      `).run(e,e,r,i.toISOString(),o),console.log(`[SessionStore] Auto-created historical session record for: ${e}`));let d=this.db.prepare(`
+      INSERT INTO session_summaries
+      (sdk_session_id, project, request, investigated, learned, completed,
+       next_steps, notes, prompt_number, discovery_tokens, created_at, created_at_epoch)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(e,r,n.request,n.investigated,n.learned,n.completed,n.next_steps,n.notes,a||null,s,i.toISOString(),o);return{id:Number(d.lastInsertRowid),createdAtEpoch:o}}markSessionCompleted(e){let r=new Date,n=r.getTime();this.db.prepare(`
       UPDATE sdk_sessions
       SET status = 'completed', completed_at = ?, completed_at_epoch = ?
       WHERE id = ?

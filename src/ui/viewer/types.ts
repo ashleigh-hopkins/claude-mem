@@ -28,6 +28,20 @@ export interface Summary {
   created_at_epoch: number;
 }
 
+export interface SessionSummary {
+  id: number;
+  session_id: string; // API returns session_id (same value as sdk_session_id in observations)
+  project: string;
+  request: string | null;
+  investigated: string | null;
+  learned: string | null;
+  completed: string | null;
+  next_steps: string | null;
+  created_at: string;
+  created_at_epoch: number;
+  prompt_number: number | null;
+}
+
 export interface UserPrompt {
   id: number;
   claude_session_id: string;

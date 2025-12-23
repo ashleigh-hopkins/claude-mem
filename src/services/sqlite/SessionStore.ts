@@ -1516,6 +1516,77 @@ export class SessionStore {
   }
 
   /**
+   * Store session summary with historical timestamp (for replay/import)
+   */
+  storeHistoricalSummary(
+    sdkSessionId: string,
+    project: string,
+    summary: {
+      request: string;
+      investigated: string;
+      learned: string;
+      completed: string;
+      next_steps: string;
+      notes: string | null;
+    },
+    createdAt: Date,
+    promptNumber?: number,
+    discoveryTokens: number = 0
+  ): { id: number; createdAtEpoch: number } {
+    const createdAtEpoch = createdAt.getTime();
+
+    // Ensure session record exists in the index (auto-create if missing)
+    const checkStmt = this.db.prepare(`
+      SELECT id FROM sdk_sessions WHERE sdk_session_id = ?
+    `);
+    const existingSession = checkStmt.get(sdkSessionId) as { id: number } | undefined;
+
+    if (!existingSession) {
+      // Auto-create session record with historical timestamp
+      const insertSession = this.db.prepare(`
+        INSERT INTO sdk_sessions
+        (claude_session_id, sdk_session_id, project, started_at, started_at_epoch, status)
+        VALUES (?, ?, ?, ?, ?, 'active')
+      `);
+      insertSession.run(
+        sdkSessionId,
+        sdkSessionId,
+        project,
+        createdAt.toISOString(),
+        createdAtEpoch
+      );
+      console.log(`[SessionStore] Auto-created historical session record for: ${sdkSessionId}`);
+    }
+
+    const stmt = this.db.prepare(`
+      INSERT INTO session_summaries
+      (sdk_session_id, project, request, investigated, learned, completed,
+       next_steps, notes, prompt_number, discovery_tokens, created_at, created_at_epoch)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const result = stmt.run(
+      sdkSessionId,
+      project,
+      summary.request,
+      summary.investigated,
+      summary.learned,
+      summary.completed,
+      summary.next_steps,
+      summary.notes,
+      promptNumber || null,
+      discoveryTokens,
+      createdAt.toISOString(),
+      createdAtEpoch
+    );
+
+    return {
+      id: Number(result.lastInsertRowid),
+      createdAtEpoch
+    };
+  }
+
+  /**
    * Mark SDK session as completed
    */
   markSessionCompleted(id: number): void {
