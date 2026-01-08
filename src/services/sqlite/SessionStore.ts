@@ -2180,6 +2180,9 @@ export class SessionStore {
 
     if (!existingSession) {
       // Auto-create session record with historical timestamp
+      // CRITICAL: Set memory_session_id to NULL during import
+      // The SDK will capture its own internal session ID on first use
+      // Setting content_session_id = memory_session_id causes SDK to crash
       const insertSession = this.db.prepare(`
         INSERT INTO sdk_sessions
         (content_session_id, memory_session_id, project, started_at, started_at_epoch, status)
@@ -2187,12 +2190,12 @@ export class SessionStore {
       `);
       insertSession.run(
         memorySessionId,
-        memorySessionId,
+        null,  // Let SDK capture its own session ID on first use
         project,
         createdAt.toISOString(),
         createdAtEpoch
       );
-      logger.info('DB', 'Auto-created historical session record', { memorySessionId });
+      logger.info('DB', 'Auto-created historical session record', { contentSessionId: memorySessionId });
     }
 
     const stmt = this.db.prepare(`
