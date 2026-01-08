@@ -7,12 +7,10 @@
  */
 
 import { stdin } from 'process';
-import { createHookResponse } from './hook-response.js';
+import { STANDARD_HOOK_RESPONSE } from './hook-response.js';
 import { logger } from '../utils/logger.js';
 import { ensureWorkerRunning, getWorkerPort } from '../shared/worker-utils.js';
 import { HOOK_TIMEOUTS } from '../shared/hook-constants.js';
-import { handleWorkerError } from '../shared/hook-error-handler.js';
-import { handleFetchError } from './shared/error-handler.js';
 
 export interface PostToolUseInput {
   session_id: string;
@@ -43,50 +41,49 @@ async function saveHook(input?: PostToolUseInput): Promise<void> {
     workerPort: port
   });
 
-  try {
-    // Send to worker - worker handles privacy check and database operations
-    const response = await fetch(`http://127.0.0.1:${port}/api/sessions/observations`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        claudeSessionId: session_id,
-        tool_name,
-        tool_input,
-        tool_response,
-        cwd: cwd || logger.happyPathError(
-          'HOOK',
-          'Missing cwd in PostToolUse hook input',
-          undefined,
-          { session_id, tool_name },
-          ''
-        )
-      }),
-      signal: AbortSignal.timeout(HOOK_TIMEOUTS.DEFAULT)
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      handleFetchError(response, errorText, {
-        hookName: 'save',
-        operation: 'Observation storage',
-        toolName: tool_name,
-        sessionId: session_id,
-        port
-      });
-    }
-
-    logger.debug('HOOK', 'Observation sent successfully', { toolName: tool_name });
-  } catch (error: any) {
-    handleWorkerError(error);
+  // Validate required fields before sending to worker
+  if (!cwd) {
+    throw new Error(`Missing cwd in PostToolUse hook input for session ${session_id}, tool ${tool_name}`);
   }
 
-  console.log(createHookResponse('PostToolUse', true));
+  // Send to worker - worker handles privacy check and database operations
+  const response = await fetch(`http://127.0.0.1:${port}/api/sessions/observations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contentSessionId: session_id,
+      tool_name,
+      tool_input,
+      tool_response,
+      cwd
+    })
+    // Note: Removed signal to avoid Windows Bun cleanup issue (libuv assertion)
+  });
+
+  if (!response.ok) {
+    throw new Error(`Observation storage failed: ${response.status}`);
+  }
+
+  logger.debug('HOOK', 'Observation sent successfully', { toolName: tool_name });
+
+  console.log(STANDARD_HOOK_RESPONSE);
 }
 
 // Entry Point
 let input = '';
 stdin.on('data', (chunk) => input += chunk);
 stdin.on('end', async () => {
-  const parsed = input ? JSON.parse(input) : undefined;
-  await saveHook(parsed);
+  try {
+    let parsed: PostToolUseInput | undefined;
+    try {
+      parsed = input ? JSON.parse(input) : undefined;
+    } catch (error) {
+      throw new Error(`Failed to parse hook input: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    await saveHook(parsed);
+  } catch (error) {
+    logger.error('HOOK', 'save-hook failed', {}, error as Error);
+  } finally {
+    process.exit(0);
+  }
 });

@@ -10,12 +10,10 @@
  */
 
 import { stdin } from 'process';
-import { createHookResponse } from './hook-response.js';
+import { STANDARD_HOOK_RESPONSE } from './hook-response.js';
 import { logger } from '../utils/logger.js';
 import { ensureWorkerRunning, getWorkerPort } from '../shared/worker-utils.js';
 import { HOOK_TIMEOUTS } from '../shared/hook-constants.js';
-import { handleWorkerError } from '../shared/hook-error-handler.js';
-import { handleFetchError } from './shared/error-handler.js';
 import { extractLastMessage } from '../shared/transcript-parser.js';
 
 export interface StopInput {
@@ -39,73 +37,57 @@ async function summaryHook(input?: StopInput): Promise<void> {
 
   const port = getWorkerPort();
 
-  // Extract last user AND assistant messages from transcript
-  const transcriptPath = input.transcript_path || logger.happyPathError(
-    'HOOK',
-    'Missing transcript_path in Stop hook input',
-    undefined,
-    { session_id },
-    ''
-  );
-  const lastUserMessage = extractLastMessage(transcriptPath, 'user');
-  const lastAssistantMessage = extractLastMessage(transcriptPath, 'assistant', true);
+  // Validate required fields before processing
+  if (!input.transcript_path) {
+    throw new Error(`Missing transcript_path in Stop hook input for session ${session_id}`);
+  }
+
+  // Extract last assistant message from transcript (the work Claude did)
+  // Note: "user" messages in transcripts are mostly tool_results, not actual user input.
+  // The user's original request is already stored in user_prompts table.
+  const lastAssistantMessage = extractLastMessage(input.transcript_path, 'assistant', true);
 
   logger.dataIn('HOOK', 'Stop: Requesting summary', {
     workerPort: port,
-    hasLastUserMessage: !!lastUserMessage,
     hasLastAssistantMessage: !!lastAssistantMessage
   });
 
-  try {
-    // Send to worker - worker handles privacy check and database operations
-    const response = await fetch(`http://127.0.0.1:${port}/api/sessions/summarize`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        claudeSessionId: session_id,
-        last_user_message: lastUserMessage,
-        last_assistant_message: lastAssistantMessage
-      }),
-      signal: AbortSignal.timeout(HOOK_TIMEOUTS.DEFAULT)
-    });
+  // Send to worker - worker handles privacy check and database operations
+  const response = await fetch(`http://127.0.0.1:${port}/api/sessions/summarize`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contentSessionId: session_id,
+      last_assistant_message: lastAssistantMessage
+    })
+    // Note: Removed signal to avoid Windows Bun cleanup issue (libuv assertion)
+  });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      handleFetchError(response, errorText, {
-        hookName: 'summary',
-        operation: 'Summary generation',
-        sessionId: session_id,
-        port
-      });
-    }
-
-    logger.debug('HOOK', 'Summary request sent successfully');
-  } catch (error: any) {
-    handleWorkerError(error);
-  } finally {
-    // Stop processing spinner
-    try {
-      const spinnerResponse = await fetch(`http://127.0.0.1:${port}/api/processing`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ isProcessing: false }),
-        signal: AbortSignal.timeout(2000)
-      });
-      if (!spinnerResponse.ok) {
-        logger.warn('HOOK', 'Failed to stop spinner', { status: spinnerResponse.status });
-      }
-    } catch (error: any) {
-      logger.warn('HOOK', 'Could not stop spinner', { error: error.message });
-    }
+  if (!response.ok) {
+    console.log(STANDARD_HOOK_RESPONSE);
+    throw new Error(`Summary generation failed: ${response.status}`);
   }
 
-  console.log(createHookResponse('Stop', true));
+  logger.debug('HOOK', 'Summary request sent successfully');
+
+  console.log(STANDARD_HOOK_RESPONSE);
 }
 
 // Entry Point
 let input = '';
 stdin.on('data', (chunk) => input += chunk);
 stdin.on('end', async () => {
-  const parsed = input ? JSON.parse(input) : undefined;
-  await summaryHook(parsed);
+  try {
+    let parsed: StopInput | undefined;
+    try {
+      parsed = input ? JSON.parse(input) : undefined;
+    } catch (error) {
+      throw new Error(`Failed to parse hook input: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    await summaryHook(parsed);
+  } catch (error) {
+    logger.error('HOOK', 'summary-hook failed', {}, error as Error);
+  } finally {
+    process.exit(0);
+  }
 });

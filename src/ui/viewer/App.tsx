@@ -3,6 +3,7 @@ import { Header } from './components/Header';
 import { FeedSimple } from './components/FeedSimple';
 import { SessionContext } from './components/SessionContext';
 import { ContextSettingsModal } from './components/ContextSettingsModal';
+import { LogsDrawer } from './components/LogsModal';
 import { useSSE } from './hooks/useSSE';
 import { useSettings } from './hooks/useSettings';
 import { useStats } from './hooks/useStats';
@@ -15,6 +16,7 @@ import { mergeAndDeduplicateByProject } from './utils/data';
 
 export function App() {
   const [contextPreviewOpen, setContextPreviewOpen] = useState(false);
+  const [logsModalOpen, setLogsModalOpen] = useState(false);
   const [paginatedObservations, setPaginatedObservations] = useState<Observation[]>([]);
   const [paginatedSummaries, setPaginatedSummaries] = useState<Summary[]>([]);
   const [paginatedPrompts, setPaginatedPrompts] = useState<UserPrompt[]>([]);
@@ -77,6 +79,11 @@ export function App() {
   // Toggle context preview modal
   const toggleContextPreview = useCallback(() => {
     setContextPreviewOpen(prev => !prev);
+  }, []);
+
+  // Toggle logs modal
+  const toggleLogsModal = useCallback(() => {
+    setLogsModalOpen(prev => !prev);
   }, []);
 
   // Handle loading more data
@@ -160,6 +167,22 @@ export function App() {
         onSave={saveSettings}
         isSaving={isSaving}
         saveStatus={saveStatus}
+      />
+
+      <button
+        className="console-toggle-btn"
+        onClick={toggleLogsModal}
+        title="Toggle Console"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="4 17 10 11 4 5"></polyline>
+          <line x1="12" y1="19" x2="20" y2="19"></line>
+        </svg>
+      </button>
+
+      <LogsDrawer
+        isOpen={logsModalOpen}
+        onClose={toggleLogsModal}
       />
     </>
   );

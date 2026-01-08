@@ -17,7 +17,6 @@ const HOOKS = [
   { name: 'new-hook', source: 'src/hooks/new-hook.ts' },
   { name: 'save-hook', source: 'src/hooks/save-hook.ts' },
   { name: 'summary-hook', source: 'src/hooks/summary-hook.ts' },
-  { name: 'cleanup-hook', source: 'src/hooks/cleanup-hook.ts' },
   { name: 'user-message-hook', source: 'src/hooks/user-message-hook.ts' }
 ];
 
@@ -34,11 +33,6 @@ const MCP_SERVER = {
 const CONTEXT_GENERATOR = {
   name: 'context-generator',
   source: 'src/services/context-generator.ts'
-};
-
-const WORKER_CLI = {
-  name: 'worker-cli',
-  source: 'src/cli/worker-cli.ts'
 };
 
 async function buildHooks() {
@@ -136,7 +130,7 @@ async function buildHooks() {
         '__DEFAULT_PACKAGE_VERSION__': `"${version}"`
       },
       banner: {
-        js: '#!/usr/bin/env bun'
+        js: '#!/usr/bin/env node'
       }
     });
 
@@ -164,31 +158,6 @@ async function buildHooks() {
 
     const contextGenStats = fs.statSync(`${hooksDir}/${CONTEXT_GENERATOR.name}.cjs`);
     console.log(`✓ context-generator built (${(contextGenStats.size / 1024).toFixed(2)} KB)`);
-
-    // Build worker CLI
-    console.log(`\n🔧 Building worker CLI...`);
-    await build({
-      entryPoints: [WORKER_CLI.source],
-      bundle: true,
-      platform: 'node',
-      target: 'node18',
-      format: 'esm',
-      outfile: `${hooksDir}/${WORKER_CLI.name}.js`,
-      minify: true,
-      logLevel: 'error',
-      external: ['bun:sqlite'],
-      define: {
-        '__DEFAULT_PACKAGE_VERSION__': `"${version}"`
-      },
-      banner: {
-        js: '#!/usr/bin/env bun'
-      }
-    });
-
-    // Make worker CLI executable
-    fs.chmodSync(`${hooksDir}/${WORKER_CLI.name}.js`, 0o755);
-    const workerCliStats = fs.statSync(`${hooksDir}/${WORKER_CLI.name}.js`);
-    console.log(`✓ worker-cli built (${(workerCliStats.size / 1024).toFixed(2)} KB)`);
 
     // Build each hook
     for (const hook of HOOKS) {
@@ -222,29 +191,13 @@ async function buildHooks() {
       console.log(`✓ ${hook.name} built (${sizeInKB} KB)`);
     }
 
-    // Build mem-search skill zip for Claude Desktop
-    console.log('\n📦 Building mem-search skill zip for Claude Desktop...');
-    const { execSync } = await import('child_process');
-    const zipOutput = 'plugin/skills/mem-search.zip';
-
-    // Remove old zip if exists
-    if (fs.existsSync(zipOutput)) {
-      fs.unlinkSync(zipOutput);
-    }
-
-    // Create zip from mem-search skill directory
-    execSync(`cd plugin/skills && zip -r mem-search.zip mem-search/`, { stdio: 'pipe' });
-    const zipStats = fs.statSync(zipOutput);
-    console.log(`✓ mem-search.zip built (${(zipStats.size / 1024).toFixed(2)} KB)`);
-
     console.log('\n✅ All hooks, worker service, and MCP server built successfully!');
     console.log(`   Output: ${hooksDir}/`);
     console.log(`   - Hooks: *-hook.js`);
     console.log(`   - Worker: worker-service.cjs`);
     console.log(`   - MCP Server: mcp-server.cjs`);
-    console.log(`   - Skills: plugin/skills/`);
-    console.log(`   - Desktop Skill: plugin/skills/mem-search.zip`);
     console.log('\n💡 Note: Dependencies will be auto-installed on first hook execution');
+    console.log('📝 Cursor hooks are in cursor-hooks/ (no build needed - plain shell scripts)');
 
   } catch (error) {
     console.error('\n❌ Build failed:', error.message);

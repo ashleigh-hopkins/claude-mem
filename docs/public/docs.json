@@ -36,13 +36,25 @@
           "introduction",
           "installation",
           "usage/getting-started",
+          "usage/openrouter-provider",
+          "usage/gemini-provider",
           "usage/search-tools",
           "usage/claude-desktop",
           "usage/private-tags",
           "usage/export-import",
-          "usage/historical-import",
+          "usage/manual-recovery",
+          "usage/folder-context",
           "beta-features",
           "endless-mode"
+        ]
+      },
+      {
+        "group": "Cursor Integration",
+        "icon": "wand-magic-sparkles",
+        "pages": [
+          "cursor/index",
+          "cursor/gemini-setup",
+          "cursor/openrouter-setup"
         ]
       },
       {
@@ -58,6 +70,7 @@
         "icon": "gear",
         "pages": [
           "configuration",
+          "modes",
           "development",
           "troubleshooting",
           "platform-integration"

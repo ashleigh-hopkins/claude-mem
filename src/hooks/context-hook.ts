@@ -6,12 +6,11 @@
  * native module dependencies.
  */
 
-import path from "path";
 import { stdin } from "process";
 import { ensureWorkerRunning, getWorkerPort } from "../shared/worker-utils.js";
 import { HOOK_TIMEOUTS } from "../shared/hook-constants.js";
-import { handleWorkerError } from "../shared/hook-error-handler.js";
-import { handleFetchError } from "./shared/error-handler.js";
+import { getProjectContext } from "../utils/project-name.js";
+import { logger } from "../utils/logger.js";
 
 export interface SessionStartInput {
   session_id: string;
@@ -25,29 +24,23 @@ async function contextHook(input?: SessionStartInput): Promise<string> {
   await ensureWorkerRunning();
 
   const cwd = input?.cwd ?? process.cwd();
-  const project = cwd ? path.basename(cwd) : "unknown-project";
+  const context = getProjectContext(cwd);
   const port = getWorkerPort();
 
-  const url = `http://127.0.0.1:${port}/api/context/inject?project=${encodeURIComponent(project)}`;
+  // Pass all projects (parent + worktree if applicable) for unified timeline
+  const projectsParam = context.allProjects.join(',');
+  const url = `http://127.0.0.1:${port}/api/context/inject?projects=${encodeURIComponent(projectsParam)}`;
 
-  try {
-    const response = await fetch(url, { signal: AbortSignal.timeout(HOOK_TIMEOUTS.DEFAULT) });
+  // Note: Removed AbortSignal.timeout due to Windows Bun cleanup issue (libuv assertion)
+  // Worker service has its own timeouts, so client-side timeout is redundant
+  const response = await fetch(url);
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      handleFetchError(response, errorText, {
-        hookName: 'context',
-        operation: 'Context generation',
-        project,
-        port
-      });
-    }
-
-    const result = await response.text();
-    return result.trim();
-  } catch (error: any) {
-    handleWorkerError(error);
+  if (!response.ok) {
+    throw new Error(`Context generation failed: ${response.status}`);
   }
+
+  const result = await response.text();
+  return result.trim();
 }
 
 // Entry Point - handle stdin/stdout
@@ -62,7 +55,12 @@ if (stdin.isTTY || forceColors) {
   let input = "";
   stdin.on("data", (chunk) => (input += chunk));
   stdin.on("end", async () => {
-    const parsed = input.trim() ? JSON.parse(input) : undefined;
+    let parsed: SessionStartInput | undefined;
+    try {
+      parsed = input.trim() ? JSON.parse(input) : undefined;
+    } catch (error) {
+      throw new Error(`Failed to parse hook input: ${error instanceof Error ? error.message : String(error)}`);
+    }
     const text = await contextHook(parsed);
 
     console.log(

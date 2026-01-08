@@ -15,7 +15,6 @@ interface CliArgs {
   maxBudget?: number;
   verbose: boolean;
   force: boolean;
-  parallel: number;
   help: boolean;
   listLanguages: boolean;
 }
@@ -45,12 +44,11 @@ OPTIONS:
   --max-budget <usd>      Maximum budget in USD
   -v, --verbose           Show detailed progress
   -f, --force             Force re-translation ignoring cache
-  --parallel <n>          Run n translations concurrently (default: 1)
   -h, --help              Show this help message
   --list-languages        List all supported language codes
 
 EXAMPLES:
-  # Translate to Spanish and French
+  # Translate to Spanish and French (runs in parallel automatically)
   translate-readme README.md es fr
 
   # Translate to multiple languages with custom output
@@ -58,6 +56,10 @@ EXAMPLES:
 
   # Use in npm scripts
   # package.json: "translate": "translate-readme README.md es fr de"
+
+PERFORMANCE:
+  All translations run in parallel automatically (up to 10 concurrent).
+  Cache prevents re-translating unchanged files.
 
 SUPPORTED LANGUAGES:
   Run with --list-languages to see all supported language codes
@@ -126,7 +128,6 @@ function parseArgs(argv: string[]): CliArgs {
     preserveCode: true,
     verbose: false,
     force: false,
-    parallel: 1,
     help: false,
     listLanguages: false,
   };
@@ -170,13 +171,6 @@ function parseArgs(argv: string[]): CliArgs {
         break;
       case "--max-budget":
         args.maxBudget = parseFloat(argv[++i]);
-        break;
-      case "--parallel":
-        args.parallel = parseInt(argv[++i], 10);
-        if (isNaN(args.parallel) || args.parallel < 1) {
-          console.error("Error: --parallel must be a positive integer");
-          process.exit(1);
-        }
         break;
       default:
         if (arg.startsWith("-")) {
@@ -242,7 +236,6 @@ async function main(): Promise<void> {
       maxBudgetUsd: args.maxBudget,
       verbose: args.verbose,
       force: args.force,
-      parallel: args.parallel,
     });
 
     // Exit with error code if any translations failed

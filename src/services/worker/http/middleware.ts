@@ -29,8 +29,11 @@ export function createMiddleware(
 
   // HTTP request/response logging
   middlewares.push((req: Request, res: Response, next: NextFunction) => {
-    // Skip logging for static assets and health checks
-    if (req.path.startsWith('/health') || req.path === '/' || req.path.includes('.')) {
+    // Skip logging for static assets, health checks, and polling endpoints
+    const staticExtensions = ['.html', '.js', '.css', '.svg', '.png', '.jpg', '.jpeg', '.webp', '.woff', '.woff2', '.ttf', '.eot'];
+    const isStaticAsset = staticExtensions.some(ext => req.path.endsWith(ext));
+    const isPollingEndpoint = req.path === '/api/logs'; // Skip logs endpoint to avoid noise from auto-refresh
+    if (req.path.startsWith('/health') || req.path === '/' || isStaticAsset || isPollingEndpoint) {
       return next();
     }
 
@@ -58,6 +61,34 @@ export function createMiddleware(
   middlewares.push(express.static(uiDir));
 
   return middlewares;
+}
+
+/**
+ * Middleware to require localhost-only access
+ * Used for admin endpoints that should not be exposed when binding to 0.0.0.0
+ */
+export function requireLocalhost(req: Request, res: Response, next: NextFunction): void {
+  const clientIp = req.ip || req.connection.remoteAddress || '';
+  const isLocalhost =
+    clientIp === '127.0.0.1' ||
+    clientIp === '::1' ||
+    clientIp === '::ffff:127.0.0.1' ||
+    clientIp === 'localhost';
+
+  if (!isLocalhost) {
+    logger.warn('SECURITY', 'Admin endpoint access denied - not localhost', {
+      endpoint: req.path,
+      clientIp,
+      method: req.method
+    });
+    res.status(403).json({
+      error: 'Forbidden',
+      message: 'Admin endpoints are only accessible from localhost'
+    });
+    return;
+  }
+
+  next();
 }
 
 /**

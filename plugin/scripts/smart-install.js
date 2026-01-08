@@ -32,7 +32,7 @@ function isBunInstalled() {
   // Check common installation paths (handles fresh installs before PATH reload)
   const bunPaths = IS_WINDOWS
     ? [join(homedir(), '.bun', 'bin', 'bun.exe')]
-    : [join(homedir(), '.bun', 'bin', 'bun'), '/usr/local/bin/bun'];
+    : [join(homedir(), '.bun', 'bin', 'bun'), '/usr/local/bin/bun', '/opt/homebrew/bin/bun'];
 
   return bunPaths.some(existsSync);
 }
@@ -56,7 +56,7 @@ function getBunPath() {
   // Check common installation paths
   const bunPaths = IS_WINDOWS
     ? [join(homedir(), '.bun', 'bin', 'bun.exe')]
-    : [join(homedir(), '.bun', 'bin', 'bun'), '/usr/local/bin/bun'];
+    : [join(homedir(), '.bun', 'bin', 'bun'), '/usr/local/bin/bun', '/opt/homebrew/bin/bun'];
 
   for (const bunPath of bunPaths) {
     if (existsSync(bunPath)) return bunPath;
@@ -102,7 +102,7 @@ function isUvInstalled() {
   // Check common installation paths (handles fresh installs before PATH reload)
   const uvPaths = IS_WINDOWS
     ? [join(homedir(), '.local', 'bin', 'uv.exe'), join(homedir(), '.cargo', 'bin', 'uv.exe')]
-    : [join(homedir(), '.local', 'bin', 'uv'), join(homedir(), '.cargo', 'bin', 'uv'), '/usr/local/bin/uv'];
+    : [join(homedir(), '.local', 'bin', 'uv'), join(homedir(), '.cargo', 'bin', 'uv'), '/usr/local/bin/uv', '/opt/homebrew/bin/uv'];
 
   return uvPaths.some(existsSync);
 }
@@ -156,7 +156,7 @@ function installBun() {
       // Try common installation paths
       const bunPaths = IS_WINDOWS
         ? [join(homedir(), '.bun', 'bin', 'bun.exe')]
-        : [join(homedir(), '.bun', 'bin', 'bun'), '/usr/local/bin/bun'];
+        : [join(homedir(), '.bun', 'bin', 'bun'), '/usr/local/bin/bun', '/opt/homebrew/bin/bun'];
 
       for (const bunPath of bunPaths) {
         if (existsSync(bunPath)) {
@@ -221,7 +221,7 @@ function installUv() {
       // Try common installation paths
       const uvPaths = IS_WINDOWS
         ? [join(homedir(), '.local', 'bin', 'uv.exe'), join(homedir(), '.cargo', 'bin', 'uv.exe')]
-        : [join(homedir(), '.local', 'bin', 'uv'), join(homedir(), '.cargo', 'bin', 'uv'), '/usr/local/bin/uv'];
+        : [join(homedir(), '.local', 'bin', 'uv'), join(homedir(), '.cargo', 'bin', 'uv'), '/usr/local/bin/uv', '/opt/homebrew/bin/uv'];
 
       for (const uvPath of uvPaths) {
         if (existsSync(uvPath)) {
@@ -250,6 +250,61 @@ function installUv() {
     }
     console.error('   Then restart your terminal and try again.');
     throw error;
+  }
+}
+
+/**
+ * Add shell alias for claude-mem command
+ */
+function installCLI() {
+  const WORKER_CLI = join(ROOT, 'plugin', 'scripts', 'worker-service.cjs');
+  const bunPath = getBunPath() || 'bun';
+  const aliasLine = `alias claude-mem='${bunPath} "${WORKER_CLI}"'`;
+  const markerPath = join(ROOT, '.cli-installed');
+
+  // Skip if already installed
+  if (existsSync(markerPath)) return;
+
+  try {
+    if (IS_WINDOWS) {
+      // Windows: Add to PATH via PowerShell profile
+      const profilePath = join(process.env.USERPROFILE || homedir(), 'Documents', 'PowerShell', 'Microsoft.PowerShell_profile.ps1');
+      const profileDir = join(process.env.USERPROFILE || homedir(), 'Documents', 'PowerShell');
+      const functionDef = `function claude-mem { & "${bunPath}" "${WORKER_CLI}" $args }\n`;
+
+      if (!existsSync(profileDir)) {
+        execSync(`mkdir "${profileDir}"`, { stdio: 'ignore', shell: true });
+      }
+
+      const existingContent = existsSync(profilePath) ? readFileSync(profilePath, 'utf-8') : '';
+      if (!existingContent.includes('function claude-mem')) {
+        writeFileSync(profilePath, existingContent + '\n' + functionDef);
+        console.error(`✅ PowerShell function added to profile`);
+        console.error('   Restart your terminal to use: claude-mem <command>');
+      }
+    } else {
+      // Unix: Add alias to shell configs
+      const shellConfigs = [
+        join(homedir(), '.bashrc'),
+        join(homedir(), '.zshrc')
+      ];
+
+      for (const config of shellConfigs) {
+        if (existsSync(config)) {
+          const content = readFileSync(config, 'utf-8');
+          if (!content.includes('alias claude-mem=')) {
+            writeFileSync(config, content + '\n' + aliasLine + '\n');
+            console.error(`✅ Alias added to ${config}`);
+          }
+        }
+      }
+      console.error('   Restart your terminal to use: claude-mem <command>');
+    }
+
+    writeFileSync(markerPath, new Date().toISOString());
+  } catch (error) {
+    console.error(`⚠️  Could not add shell alias: ${error.message}`);
+    console.error(`   Use directly: ${bunPath} "${WORKER_CLI}" <command>`);
   }
 }
 
@@ -348,9 +403,35 @@ try {
 
   // Step 3: Install dependencies if needed
   if (needsInstall()) {
+    const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf-8'));
+    const newVersion = pkg.version;
+
     installDeps();
     console.error('✅ Dependencies installed');
+
+    // Auto-restart worker to pick up new code
+    const port = process.env.CLAUDE_MEM_WORKER_PORT || 37777;
+    console.error(`[claude-mem] Plugin updated to v${newVersion} - restarting worker...`);
+    try {
+      // Graceful shutdown via HTTP (curl is cross-platform enough)
+      execSync(`curl -s -X POST http://127.0.0.1:${port}/api/admin/shutdown`, {
+        stdio: 'ignore',
+        shell: IS_WINDOWS,
+        timeout: 5000
+      });
+      // Brief wait for port to free
+      execSync(IS_WINDOWS ? 'timeout /t 1 /nobreak >nul' : 'sleep 0.5', {
+        stdio: 'ignore',
+        shell: true
+      });
+    } catch {
+      // Worker wasn't running or already stopped - that's fine
+    }
+    // Worker will be started fresh by next hook in chain (worker-service.cjs start)
   }
+
+  // Step 4: Install CLI to PATH
+  installCLI();
 } catch (e) {
   console.error('❌ Installation failed:', e.message);
   process.exit(1);
